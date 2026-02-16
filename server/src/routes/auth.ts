@@ -186,11 +186,28 @@ router.post('/guest', async (req: Request, res: Response) => {
 
     console.log('[Auth] Creating guest user:', guestUsername);
     
-    // Create guest user
-    await db.prepare(`
-      INSERT INTO users (id, username, email, password, avatar_id, level, xp, is_guest, expires_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(userId, guestUsername, null, null, '👤', 1, 0, true, expiresAt.toISOString());
+    // Try to create guest user with all columns (including is_guest and expires_at)
+    // Use empty string for email to satisfy NOT NULL constraint in PostgreSQL
+    const guestEmail = `guest-${userId}@kribble.local`;
+    try {
+      await db.prepare(`
+        INSERT INTO users (id, username, email, password, avatar_id, level, xp, is_guest, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(userId, guestUsername, guestEmail, '', '👤', 1, 0, true, expiresAt.toISOString());
+    } catch (insertError: any) {
+      // If columns don't exist, fall back to basic insert without guest columns
+      if (insertError.message?.includes('is_guest') || insertError.message?.includes('expires_at') || 
+          insertError.message?.includes('column') || insertError.message?.includes('no such column')) {
+        console.log('[Auth] Guest columns not found, using basic insert');
+        await db.prepare(`
+          INSERT INTO users (id, username, email, password, avatar_id, level, xp)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(userId, guestUsername, guestEmail, '', '👤', 1, 0);
+      } else {
+        throw insertError;
+      }
+    }
+
 
     // Generate token
     const token = jwt.sign({ userId }, JWT_SECRET, { expiresIn: '1d' });
@@ -214,6 +231,7 @@ router.post('/guest', async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Server error', details: String(error) });
   }
 });
+
 
 
 // Update profile
