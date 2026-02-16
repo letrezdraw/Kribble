@@ -1,0 +1,142 @@
+/* ============================================
+   DRAWING CANVAS
+   ============================================ */
+
+.canvas-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: white;
+  border-radius: var(--radius-xl);
+}
+
+/* Viewport - clips the transformed canvas */
+.canvas-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #1a1a2e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Inner container that gets the CSS transform */
+.canvas-inner {
+  position: relative;
+  width: 800px;
+  height: 800px;
+  transform-origin: center center;
+  will-change: transform;
+  flex-shrink: 0;
+}
+
+
+
+.canvas-inner.panning {
+  cursor: grab;
+}
+
+/* Canvas elements - fixed size 800x800 */
+.canvas-static {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 800px;
+  height: 800px;
+  z-index: 1;
+  touch-action: none;
+}
+
+.canvas-live {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 800px;
+  height: 800px;
+  z-index: 2;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.canvas-live.panning {
+  cursor: grabbing;
+}
+
+.canvas-live.view-only {
+  cursor: default;
+  pointer-events: none;
+}
+
+
+/* Canvas Controls */
+.canvas-controls {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  display: flex;
+  gap: var(--space-2);
+  z-index: 10;
+}
+
+.canvas-control-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-lg);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.canvas-control-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Loading State */
+.canvas-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-primary);
+  z-index: 20;
+}
+
+.canvas-loading .spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--bg-elevated);
+  border-top-color: var(--primary-500);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* Animations */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .canvas-controls {
+    top: var(--space-2);
+    right: var(--space-2);
+  }
+  
+  .canvas-control-btn {
+    width: 32px;
+    height: 32px;
+  }
+}
