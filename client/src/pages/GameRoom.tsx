@@ -45,7 +45,8 @@ export default function GameRoom() {
   const location = useLocation();
   const { user } = useAuth();
   const { socket } = useSocket();
-  const { room, gameState, isDrawer, isHost, leaveRoom, submitGuess, startGame, rankings, playAgain, selectWord, joinRoom } = useGame();
+  const { room, gameState, isDrawer, isHost, leaveRoom, submitGuess, startGame, rankings, playAgain, selectWord, joinRoom, requestHint } = useGame();
+
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [guess, setGuess] = useState('');
@@ -100,11 +101,14 @@ export default function GameRoom() {
   }, [room, isHost]);
 
 
-
-
-
+  // FIX: Update settings function with proper room ID from room object
   const updateSettings = useCallback(() => {
-    if (!isHost || !socket || !room?.id) return;
+    if (!isHost || !socket || !room?.id) {
+      console.log('[updateSettings] Cannot update - isHost:', isHost, 'socket:', !!socket, 'room?.id:', room?.id);
+      return;
+    }
+    
+    console.log('[updateSettings] Emitting room:update-settings for room:', room.id);
     socket.emit('room:update-settings', {
       roomId: room.id,
       settings: {
@@ -118,7 +122,6 @@ export default function GameRoom() {
       }
     });
   }, [isHost, socket, room, gameSettings]);
-
 
 
   const handleClearCanvas = useCallback(() => {
@@ -151,17 +154,37 @@ export default function GameRoom() {
     };
 
     const handleGuessCorrect = (data: { playerId: string; username: string; word: string; points?: number }) => {
+      // Prevent duplicate messages - check if we already have a similar message recently
+      const recentMessage = Array.from(processedMessageIds.current).find(id => {
+        const msg = messages.find(m => m.id === id);
+        return msg && msg.message.includes(`${data.username} guessed the word`);
+      });
+      
+      if (recentMessage) {
+        console.log('[GameRoom] Duplicate guess message blocked for:', data.username);
+        return;
+      }
+      
       const messageId = generateMessageId();
       processedMessageIds.current.add(messageId);
+      
+      // If points is 0, this is the immediate notification - don't show points yet
+      // Points will be shown at round end
+      const messageText = data.points && data.points > 0 
+        ? `${data.username} guessed the word! (+${data.points} pts)`
+        : `${data.username} guessed the word!`;
+      
       setMessages(prev => [...prev, {
         id: messageId,
         playerId: 'system',
         username: 'System',
-        message: `${data.username} guessed the word! (+${data.points || 0} pts)`,
+        message: messageText,
         isCorrect: true,
         timestamp: new Date(),
       }]);
     };
+
+
 
     socket.on('chat:message', handleChatMessage);
     socket.on('game:guess-correct', handleGuessCorrect);
@@ -309,10 +332,15 @@ export default function GameRoom() {
                   <span className="word-blanks">{getWordDisplay()}</span>
                 </div>
               )}
-              <div className="hints-remaining">
+              <div 
+                className="hints-remaining"
+                title="Hints are revealed automatically during the round"
+              >
                 <Sparkles size={14} />
-                {gameState.hintsRemaining} hints left
+                {gameState.hintsRemaining} hints remaining
               </div>
+
+
             </div>
           )}
 

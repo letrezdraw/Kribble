@@ -5,7 +5,9 @@ import { ArrowLeft, Trophy, Target, Clock, Zap, Award, Star, TrendingUp, Calenda
 import { useAuth } from '../../contexts/AuthContext';
 import Button from '../../components/Button';
 import { getRankByLevel } from '../../utils/ranks';
+import api from '../../services/api';
 import './ProfileMobile.css';
+
 
 
 
@@ -25,12 +27,13 @@ export default function ProfileMobile() {
   }, []);
 
   const fetchMatchHistory = async () => {
-    try { const res = await fetch('/api/users/match-history'); if (res.ok) { const data = await res.json(); setMatchHistory(data.matches || []); } } catch {}
+    try { const res = await api.get('/users/match-history'); setMatchHistory(res.data.matches || []); } catch {}
   };
 
   const fetchAchievements = async () => {
-    try { const res = await fetch('/api/users/achievements'); if (res.ok) { const data = await res.json(); setAchievements(data.achievements || []); } } catch {}
+    try { const res = await api.get('/users/achievements'); setAchievements(res.data.achievements || []); } catch {}
   };
+
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);

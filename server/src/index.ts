@@ -23,11 +23,14 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const httpServer = createServer(app);
 
-// Environment-based CORS
+// Environment-based CORS configuration
+// In development: allow common Vite ports (5173, 3000, 4173) and any localhost
+// In production: use CORS_ORIGIN env var or allow all (for Render/Railway same-origin)
 const isProduction = process.env.NODE_ENV === 'production';
 const corsOrigins = isProduction 
-  ? [process.env.CORS_ORIGIN || 'https://kribble.onrender.com', '*'] 
-  : ['http://localhost:5173', 'http://localhost:3000'];
+  ? (process.env.CORS_ORIGIN ? [process.env.CORS_ORIGIN] : ['*'])
+  : ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:4173', 'http://127.0.0.1:5173', 'http://127.0.0.1:3000'];
+
 
 
 const io = new Server(httpServer, {

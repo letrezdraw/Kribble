@@ -90,12 +90,16 @@ export default function DrawingCanvas({
   const [displaySize, setDisplaySize] = useState({ width: CANVAS_SIZE, height: CANVAS_SIZE });
   const [showTransformControls, setShowTransformControls] = useState(false);
 
+  // Detect mobile for default zoom
+  const isMobile = window.innerWidth < 768;
+  
   const [transform, setTransform] = useState<Transform>({
-    scale: 1,
+    scale: isMobile ? 0.5 : 1,
     translateX: 0,
     translateY: 0,
     rotation: 0,
   });
+
   
   // Use ref to always have latest transform for coordinate calculations
   const transformRef = useRef<Transform>(transform);
@@ -231,16 +235,27 @@ export default function DrawingCanvas({
       clearLiveCanvas();
     });
 
+    // Listen for CLEAR_CANVAS event from server (when new drawer starts)
+    socket.on('CLEAR_CANVAS', () => {
+      console.log('[DrawingCanvas] CLEAR_CANVAS received - clearing canvas for new drawer');
+      strokesRef.current = [];
+      redoStackRef.current = [];
+      redrawAllStrokes(staticCtxRef.current!, []);
+      clearLiveCanvas();
+    });
+
     socket.on('draw:undo', () => undoInternal());
     socket.on('draw:redo', () => redoInternal());
 
     return () => {
       socket.off('draw:stroke');
       socket.off('draw:clear');
+      socket.off('CLEAR_CANVAS');
       socket.off('draw:undo');
       socket.off('draw:redo');
     };
   }, [socket]);
+
 
   // Keyboard shortcuts - Photoshop style
   useEffect(() => {
@@ -501,7 +516,7 @@ export default function DrawingCanvas({
 
   // Window mouse events for drawing outside canvas
   useEffect(() => {
-    if (!isDrawing) return;
+    if (!isDrawing || !isDrawer) return; // Block non-drawers from drawing
 
     const handleMouseMove = (e: MouseEvent) => {
       if (!liveCtxRef.current) return;
@@ -596,7 +611,8 @@ export default function DrawingCanvas({
       window.removeEventListener('mouseup', handleMouseUp);
     };
 
-  }, [isDrawing, activeTool, brushSize, brushColor, brushOpacity, transform, scheduleRender, brushSettings.showLivePreview, renderStrokeImmediate]);
+  }, [isDrawing, isDrawer, activeTool, brushSize, brushColor, brushOpacity, transform, scheduleRender, brushSettings.showLivePreview, renderStrokeImmediate]);
+
 
   // Touch gesture state for mobile
   const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
@@ -667,9 +683,29 @@ export default function DrawingCanvas({
 
   // Mobile touch handlers for pinch-zoom and pan
   const handleTouchStart = (e: React.TouchEvent) => {
-    if (!isDrawer) return;
-    
     const touches = e.touches;
+    
+    // Non-drawers can only pan with single touch or pinch zoom with two fingers
+    if (!isDrawer) {
+      if (touches.length === 1) {
+        // Single touch - start panning for non-drawers
+        const touch = touches[0];
+        touchStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
+        setGestureState('panning');
+        setIsPanning(true);
+        panStartRef.current = { x: touch.clientX, y: touch.clientY };
+      } else if (touches.length === 2) {
+        // Two finger pinch zoom for non-drawers
+        setGestureState('multi-touch');
+        touchStartDistanceRef.current = getTouchDistance(touches);
+        touchStartTransformRef.current = { ...transformRef.current };
+        touchStartCenterRef.current = {
+          x: (touches[0].clientX + touches[1].clientX) / 2,
+          y: (touches[0].clientY + touches[1].clientY) / 2
+        };
+      }
+      return;
+    }
     
     // Track all active touches
     activeTouchesRef.current.clear();
@@ -681,6 +717,7 @@ export default function DrawingCanvas({
     }
     
     if (touches.length === 1) {
+
       // Single touch - check if we should start drawing
       // Only draw if not currently in a multi-touch gesture
       if (gestureState === 'idle' || gestureState === 'drawing') {
@@ -729,10 +766,65 @@ export default function DrawingCanvas({
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isDrawer) return;
     e.preventDefault(); // Prevent scrolling
     
     const touches = e.touches;
+    
+    // Handle non-drawer touch interactions (pan and zoom only)
+    if (!isDrawer) {
+      if (touches.length === 1 && isPanning && gestureState === 'panning') {
+        // Single touch panning for non-drawers
+        const touch = touches[0];
+        if (panStartRef.current) {
+          const dx = touch.clientX - panStartRef.current.x;
+          const dy = touch.clientY - panStartRef.current.y;
+          setTransform((prev) => ({
+            ...prev,
+            translateX: prev.translateX + dx * 0.5,
+            translateY: prev.translateY + dy * 0.5,
+          }));
+          panStartRef.current = { x: touch.clientX, y: touch.clientY };
+        }
+        return;
+      } else if (touches.length === 2 && touchStartDistanceRef.current && touchStartTransformRef.current) {
+        // Two finger pinch zoom for non-drawers
+        const currentDistance = getTouchDistance(touches);
+        const scaleFactor = currentDistance / touchStartDistanceRef.current;
+        
+        const currentCenterX = (touches[0].clientX + touches[1].clientX) / 2;
+        const currentCenterY = (touches[0].clientY + touches[1].clientY) / 2;
+        
+        const startTransform = touchStartTransformRef.current;
+        const newScale = Math.max(0.25, Math.min(4, startTransform.scale * scaleFactor));
+        
+        const viewportRect = containerRef.current?.getBoundingClientRect();
+        if (viewportRect && touchStartCenterRef.current) {
+          const viewportCenterX = viewportRect.left + viewportRect.width / 2;
+          const viewportCenterY = viewportRect.top + viewportRect.height / 2;
+          
+          const panDeltaX = currentCenterX - touchStartCenterRef.current.x;
+          const panDeltaY = currentCenterY - touchStartCenterRef.current.y;
+          
+          const scaleRatio = newScale / startTransform.scale;
+          const zoomAdjustX = (touchStartCenterRef.current.x - viewportCenterX - startTransform.translateX) * (scaleRatio - 1);
+          const zoomAdjustY = (touchStartCenterRef.current.y - viewportCenterY - startTransform.translateY) * (scaleRatio - 1);
+          
+          setTransform({
+            ...startTransform,
+            scale: newScale,
+            translateX: startTransform.translateX + panDeltaX + zoomAdjustX,
+            translateY: startTransform.translateY + panDeltaY + zoomAdjustY,
+          });
+        } else {
+          setTransform({
+            ...startTransform,
+            scale: newScale,
+          });
+        }
+        return;
+      }
+      return;
+    }
     
     // Update tracked touches
     for (let i = 0; i < touches.length; i++) {
@@ -764,6 +856,7 @@ export default function DrawingCanvas({
     }
     
     if (touches.length === 1 && gestureState === 'drawing' && isDrawing) {
+
       // Single touch drawing - only if we're in drawing mode
       const touch = touches[0];
       const pos = getPos(e as unknown as React.MouseEvent, containerRef, transformRef.current);
@@ -834,9 +927,29 @@ export default function DrawingCanvas({
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
-    if (!isDrawer) return;
-    
     const touches = e.touches;
+    
+    // Handle non-drawer touch end
+    if (!isDrawer) {
+      if (touches.length === 0) {
+        // All touches ended
+        setGestureState('idle');
+        setIsPanning(false);
+        touchStartRef.current = null;
+        touchStartDistanceRef.current = null;
+        touchStartTransformRef.current = null;
+        touchStartCenterRef.current = null;
+        panStartRef.current = null;
+      } else if (touches.length === 1 && gestureState === 'multi-touch') {
+        // Went from 2+ fingers to 1
+        setGestureState('idle');
+        touchStartDistanceRef.current = null;
+        touchStartTransformRef.current = null;
+        touchStartCenterRef.current = null;
+      }
+      return;
+    }
+
     
     // Remove ended touches from tracking
     const changedTouches = e.changedTouches;
@@ -991,7 +1104,18 @@ export default function DrawingCanvas({
 
   // Pointer event handler for pen tablet support
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!isDrawer || !staticCtxRef.current || !liveCtxRef.current) return;
+    if (!isDrawer || !staticCtxRef.current || !liveCtxRef.current) {
+      // Non-drawers can only pan/zoom, not draw
+      // Allow panning with any left click, middle mouse, or space+click
+      if (e.button === 0 || e.button === 1) {
+        e.preventDefault();
+        setIsPanning(true);
+        panStartRef.current = { x: e.clientX, y: e.clientY };
+      }
+      return;
+    }
+
+
     
     // RIGHT CLICK - Show context menu only, don't draw
     if (e.button === 2) {
@@ -1096,7 +1220,7 @@ export default function DrawingCanvas({
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    // Handle panning
+    // Handle panning for everyone (drawers and non-drawers)
     if (isPanning) {
       e.preventDefault();
       if (!panStartRef.current) return;
@@ -1110,6 +1234,12 @@ export default function DrawingCanvas({
       panStartRef.current = { x: e.clientX, y: e.clientY };
       return;
     }
+
+    // Non-drawers can only pan/zoom - block all drawing operations
+    if (!isDrawer && !isZooming) {
+      return;
+    }
+
 
     // Handle zooming
     if (isZooming && zoomStartRef.current) {
@@ -1198,8 +1328,14 @@ export default function DrawingCanvas({
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // Non-drawers can only pan/zoom
+    if (!isDrawer && !isPanning && !isZooming && !isBrushSizing) {
+      return;
+    }
+
     // End panning
     if (isPanning) {
+
       setIsPanning(false);
       panStartRef.current = null;
       return;
@@ -1345,7 +1481,11 @@ export default function DrawingCanvas({
   }, []);
 
   const clearCanvas = useCallback(() => {
-    if (!isDrawer) return;
+    if (!isDrawer) {
+      console.log('[DrawingCanvas] Non-drawer tried to clear canvas - blocked');
+      return;
+    }
+
     strokesRef.current = [];
     redoStackRef.current = [];
     redrawAllStrokes(staticCtxRef.current!, []);
@@ -1355,14 +1495,22 @@ export default function DrawingCanvas({
   }, [isDrawer, socket, onClear, clearLiveCanvas]);
 
   const undo = useCallback(() => {
-    if (!isDrawer) return;
+    if (!isDrawer) {
+      console.log('[DrawingCanvas] Non-drawer tried to undo - blocked');
+      return;
+    }
+
     undoInternal();
     socket?.emit('draw:undo');
     onUndo?.();
   }, [isDrawer, socket, onUndo, undoInternal]);
 
   const redo = useCallback(() => {
-    if (!isDrawer) return;
+    if (!isDrawer) {
+      console.log('[DrawingCanvas] Non-drawer tried to redo - blocked');
+      return;
+    }
+
     redoInternal();
     socket?.emit('draw:redo');
     onRedo?.();

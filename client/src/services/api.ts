@@ -1,10 +1,13 @@
 import axios from 'axios';
 
-// Use relative URL for same-origin requests (works with Express serving client)
-const API_URL = '';
+// Use Vite environment variable for API URL
+// In development: set in .env.development (e.g., http://localhost:3001)
+// In production: empty string for same-origin (works when Express serves the client)
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 const api = axios.create({
   baseURL: `${API_URL}/api`,
+
   headers: {
     'Content-Type': 'application/json',
   },

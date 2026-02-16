@@ -38,15 +38,18 @@ export interface RoomSettings {
 
 
 export interface GameState {
-  phase: 'lobby' | 'selection' | 'drawing' | 'roundEnd' | 'gameEnd' | 'freeDraw';
+  phase: 'lobby' | 'selection' | 'drawing' | 'turnEnd' | 'roundEnd' | 'gameEnd' | 'freeDraw';
   currentRound: number;
+  currentTurn: number; // Turn within current round (1 to playerCount)
   currentDrawerIndex: number;
   currentWord: string;
   wordHints: string[];
   hintsRemaining: number;
   timeRemaining: number;
   totalRounds: number;
+  totalTurns: number; // Total turns in entire game (rounds * players)
 }
+
 
 export interface Room {
   id: string;
@@ -58,7 +61,9 @@ export interface Room {
   settings: RoomSettings;
   gameState: GameState;
   createdAt: Date;
+  canvasState?: any[]; // Store canvas strokes for persistence
 }
+
 
 // Shared in-memory room storage
 export const rooms = new Map<string, Room>();
@@ -85,13 +90,16 @@ export function createRoom(name: string, settings: Partial<RoomSettings> = {}): 
     gameState: {
       phase: 'lobby',
       currentRound: 1,
+      currentTurn: 1,
       currentDrawerIndex: -1,
       currentWord: '',
       wordHints: [],
       hintsRemaining: 3,
       timeRemaining: settings.roundTime || 60,
-      totalRounds: settings.rounds || 6,
+      totalRounds: settings.rounds || 3,
+      totalTurns: 0, // Will be calculated when game starts based on player count
     },
+
     createdAt: new Date(),
   };
   

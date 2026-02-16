@@ -13,6 +13,8 @@ import Button from '../components/Button';
 import CreateRoomModal from '../components/CreateRoomModal';
 import { getRankByLevel } from '../utils/ranks';
 import type { LeaderboardEntry } from '../types';
+import api from '../services/api';
+
 
 import './Lobby.css';
 
@@ -61,37 +63,28 @@ export default function Lobby() {
 
   const fetchOnlineCount = async () => {
     try {
-      const response = await fetch('/api/users/online/count');
-      if (response.ok) {
-        const data = await response.json();
-        setOnlineCount(data.count);
-      }
+      const response = await api.get('/users/online/count');
+      setOnlineCount(response.data.count);
     } catch (error) {
       console.error('Failed to fetch online count:', error);
     }
   };
 
+
   const fetchLeaderboard = async () => {
     try {
-      const response = await fetch('/api/users/leaderboard?limit=5');
-      if (response.ok) {
-        const data = await response.json();
-        setLeaderboard(data.leaderboard);
-      }
+      const response = await api.get('/users/leaderboard?limit=5');
+      setLeaderboard(response.data.leaderboard);
     } catch (error) {
       console.error('Failed to fetch leaderboard:', error);
     }
   };
 
+
   const fetchRooms = async () => {
     try {
-      const response = await fetch('/api/rooms');
-      if (response.ok) {
-        const data = await response.json();
-        setRooms(data.rooms || []);
-      } else {
-        setRooms([]);
-      }
+      const response = await api.get('/rooms');
+      setRooms(response.data.rooms || []);
     } catch (error) {
       console.error('Failed to fetch rooms:', error);
       setRooms([]);
@@ -99,6 +92,7 @@ export default function Lobby() {
       setLoading(false);
     }
   };
+
 
   useEffect(() => {
     let filtered = rooms;

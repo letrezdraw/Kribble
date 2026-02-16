@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, User, Bell, Shield, Palette, Volume2, Moon, Globe, Smartphone, ChevronRight } from 'lucide-react';
@@ -6,30 +6,69 @@ import { useAuth } from '../contexts/AuthContext';
 import Button from '../components/Button';
 import './Settings.css';
 
+// Default settings
+const DEFAULT_SETTINGS = {
+  username: '',
+  email: '',
+  theme: 'dark',
+  sound: true,
+  music: true,
+  notifications: true,
+  emailNotifications: false,
+  profilePublic: true,
+  chatEnabled: true,
+  language: 'en',
+  haptic: true,
+};
+
+// Load settings from localStorage
+const loadSettings = () => {
+  try {
+    const saved = localStorage.getItem('kribble_settings');
+    if (saved) {
+      return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+    }
+  } catch (e) {
+    console.error('Failed to load settings:', e);
+  }
+  return DEFAULT_SETTINGS;
+};
+
+// Save settings to localStorage
+const saveSettingsToStorage = (settings: typeof DEFAULT_SETTINGS) => {
+  try {
+    localStorage.setItem('kribble_settings', JSON.stringify(settings));
+  } catch (e) {
+    console.error('Failed to save settings:', e);
+  }
+};
+
 export default function Settings() {
   const navigate = useNavigate();
   const { user } = useAuth();
   
   const [activeTab, setActiveTab] = useState<'account' | 'preferences' | 'privacy' | 'notifications'>('account');
   
-  const [settings, setSettings] = useState({
-    username: user?.username || '',
-    email: user?.email || '',
-    theme: 'dark',
-    sound: true,
-    music: true,
-    notifications: true,
-    emailNotifications: false,
-    profilePublic: true,
-    chatEnabled: true,
-    language: 'en',
-    haptic: true,
+  const [settings, setSettings] = useState(() => {
+    const loaded = loadSettings();
+    return {
+      ...loaded,
+      username: user?.username || loaded.username || '',
+      email: user?.email || loaded.email || '',
+    };
   });
 
+  // Persist settings to localStorage whenever they change
+  useEffect(() => {
+    saveSettingsToStorage(settings);
+  }, [settings]);
+
   const handleSave = () => {
-    console.log('Saving settings:', settings);
-    // Save settings logic
+    saveSettingsToStorage(settings);
+    // Show success feedback
+    alert('Settings saved successfully!');
   };
+
 
   const tabs = [
     { id: 'account', label: 'Account', icon: User },

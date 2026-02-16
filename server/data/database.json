@@ -453,7 +453,65 @@
       ]
     }
   },
-  "player_stats": {},
-  "match_history": [],
+  "player_stats": {
+    "player-97c44751-02af-4190-9d63-efdae3e5e9ae": {
+      "user_id": "player-97c44751-02af-4190-9d63-efdae3e5e9ae",
+      "games_played": 1,
+      "games_won": 1,
+      "total_score": 108,
+      "words_drawn": 0,
+      "words_guessed": 0,
+      "total_play_time": 2,
+      "current_streak": 1,
+      "best_streak": 1,
+      "last_played_at": "2026-02-16T15:57:34.897Z",
+      "updated_at": "2026-02-16T15:57:34.897Z"
+    },
+    "70b5b76e-849c-4d1b-8a56-0d9a93518268": {
+      "user_id": "70b5b76e-849c-4d1b-8a56-0d9a93518268",
+      "games_played": 2,
+      "games_won": 1,
+      "total_score": 327,
+      "words_drawn": 0,
+      "words_guessed": 0,
+      "total_play_time": 6,
+      "current_streak": 1,
+      "best_streak": 1,
+      "last_played_at": "2026-02-16T16:28:07.579Z",
+      "updated_at": "2026-02-16T16:28:07.579Z"
+    }
+  },
+  "match_history": [
+    {
+      "id": "282e1133-0546-4a8a-a854-83905fcb3a94",
+      "user_id": "player-97c44751-02af-4190-9d63-efdae3e5e9ae",
+      "score": 108,
+      "words_guessed": 0,
+      "words_drawn": 1,
+      "play_time": 0,
+      "won": false,
+      "played_at": "2026-02-16T15:57:34.898Z"
+    },
+    {
+      "id": "ab53bae0-9762-468b-911a-85fad3db5bab",
+      "user_id": "70b5b76e-849c-4d1b-8a56-0d9a93518268",
+      "score": 107,
+      "words_guessed": 0,
+      "words_drawn": 0,
+      "play_time": 0,
+      "won": false,
+      "played_at": "2026-02-16T15:57:34.936Z"
+    },
+    {
+      "id": "57e9e98c-688d-4ba7-8f47-031bedf185a6",
+      "user_id": "70b5b76e-849c-4d1b-8a56-0d9a93518268",
+      "score": 220,
+      "words_guessed": 0,
+      "words_drawn": 1,
+      "play_time": 0,
+      "won": false,
+      "played_at": "2026-02-16T16:28:07.579Z"
+    }
+  ],
   "daily_challenges": {}
 }

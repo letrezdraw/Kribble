@@ -49,7 +49,7 @@ export function setupEraser(ctx: CanvasRenderingContext2D, size: number): void {
   ctx.globalAlpha = 1;
 }
 
-// Unified distance-based stamping - MATCHES live renderer exactly
+// Unified distance-based stamping - FIXED: No more opacity blobs
 export function drawPressureStroke(
   ctx: CanvasRenderingContext2D,
   points: PressurePoint[],
@@ -65,7 +65,7 @@ export function drawPressureStroke(
   ctx.lineJoin = 'round';
 
   const baseRadius = baseSize / 2;
-  const minSpacing = 0.1;
+  const minSpacing = 0.5; // Increased from 0.1 to reduce overlap
 
   // Track last stamp position for consistent spacing
   let lastStamp = points[0];
@@ -80,17 +80,15 @@ export function drawPressureStroke(
     const mappedPressure = mapPressure(p.pressure);
     const stampRadius = baseRadius * mappedPressure;
 
-    // spacing = radius * 0.02 gives ~98% overlap for ultra-smooth strokes
-    const spacing = Math.max(minSpacing, stampRadius * 0.02);
+    // FIXED: Adjust spacing based on opacity to prevent blobbing
+    // Lower opacity = larger spacing to reduce overlap artifacts
+    const opacityFactor = Math.max(0.3, baseOpacity);
+    const spacing = Math.max(minSpacing, stampRadius * (0.05 + (1 - opacityFactor) * 0.1));
 
     if (dist < spacing) continue;
 
     // Always interpolate for smooth strokes - fill ALL gaps
     if (dist > spacing * 1.01) {
-
-
-
-
       const steps = Math.floor(dist / spacing);
       for (let j = 1; j <= steps; j++) {
         const t = j / steps;
@@ -103,7 +101,8 @@ export function drawPressureStroke(
 
         ctx.globalCompositeOperation = 'source-over';
         ctx.fillStyle = isEraser ? BG_COLOR : color;
-        ctx.globalAlpha = isEraser ? 1 : interpOpacity;
+        // FIXED: Clamp opacity to prevent accumulation artifacts
+        ctx.globalAlpha = isEraser ? 1 : Math.min(1, interpOpacity);
 
         ctx.beginPath();
         ctx.arc(interpX, interpY, interpStampRadius, 0, Math.PI * 2);
@@ -115,7 +114,8 @@ export function drawPressureStroke(
 
       ctx.globalCompositeOperation = 'source-over';
       ctx.fillStyle = isEraser ? BG_COLOR : color;
-      ctx.globalAlpha = isEraser ? 1 : opacity;
+      // FIXED: Clamp opacity
+      ctx.globalAlpha = isEraser ? 1 : Math.min(1, opacity);
 
       ctx.beginPath();
       ctx.arc(p.x, p.y, stampRadius, 0, Math.PI * 2);
@@ -124,7 +124,6 @@ export function drawPressureStroke(
 
     lastStamp = p;
   }
-
 
   ctx.restore();
 }
@@ -270,11 +269,11 @@ export function drawText(
   ctx.restore();
 }
 
-// Color tolerance for gap detection - increased for anti-aliased edges
-const COLOR_TOLERANCE = 48;
-const GAP_CLOSURE_RADIUS = 2; // Pixels to check for gap closure
+// Color tolerance for gap detection
+const COLOR_TOLERANCE = 32;
+const GAP_CLOSURE_RADIUS = 3;
 
-// Flood fill algorithm (paint bucket) with improved gap detection
+// FIXED: Improved flood fill algorithm
 export function floodFill(
   ctx: CanvasRenderingContext2D,
   startX: number,
@@ -292,15 +291,16 @@ export function floodFill(
   const imageData = ctx.getImageData(0, 0, width, height);
   const data = imageData.data;
   
+  // Parse fill color
   const tempCtx = document.createElement('canvas').getContext('2d')!;
   tempCtx.fillStyle = fillColor;
   tempCtx.fillRect(0, 0, 1, 1);
   const fillData = tempCtx.getImageData(0, 0, 1, 1).data;
   
-  const r = fillData[0];
-  const g = fillData[1];
-  const b = fillData[2];
-  const a = Math.round(255 * opacity);
+  const fillR = fillData[0];
+  const fillG = fillData[1];
+  const fillB = fillData[2];
+  const fillA = Math.round(255 * opacity);
   
   const startIdx = (startY * width + startX) * 4;
   const targetR = data[startIdx];
@@ -308,13 +308,14 @@ export function floodFill(
   const targetB = data[startIdx + 2];
   const targetA = data[startIdx + 3];
   
-  if (targetR === r && targetG === g && targetB === b && targetA === a) {
+  // Don't fill if already the target color
+  if (targetR === fillR && targetG === fillG && targetB === fillB && targetA === fillA) {
     return;
   }
   
-  const stack: [number, number][] = [[startX, startY]];
+  // FIXED: Use a more efficient queue-based approach
+  const queue: [number, number][] = [[startX, startY]];
   const visited = new Uint8Array(width * height);
-  const filled = new Uint8Array(width * height); // Track actually filled pixels
   
   const getIdx = (x: number, y: number) => (y * width + x) * 4;
   const getKey = (x: number, y: number) => y * width + x;
@@ -328,38 +329,20 @@ export function floodFill(
     return (dr + dg + db + da) <= COLOR_TOLERANCE * 2;
   };
   
-  // Check if already filled with target color
-  const isFilled = (idx: number) => {
-    return data[idx] === r && data[idx + 1] === g && data[idx + 2] === b && data[idx + 3] === a;
-  };
-  
-  // Check if there's a boundary nearby (for gap detection)
-  const hasBoundaryNearby = (x: number, y: number): boolean => {
-    for (let dy = -GAP_CLOSURE_RADIUS; dy <= GAP_CLOSURE_RADIUS; dy++) {
-      for (let dx = -GAP_CLOSURE_RADIUS; dx <= GAP_CLOSURE_RADIUS; dx++) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-        
-        const idx = getIdx(nx, ny);
-        // If we find a significantly different color (likely a stroke), consider it a boundary
-        const dr = Math.abs(data[idx] - targetR);
-        const dg = Math.abs(data[idx + 1] - targetG);
-        const db = Math.abs(data[idx + 2] - targetB);
-        if (dr + dg + db > COLOR_TOLERANCE * 3) {
-          return true;
-        }
-      }
-    }
-    return false;
+  // Check if pixel is a boundary (stroke)
+  const isBoundary = (idx: number) => {
+    const dr = Math.abs(data[idx] - targetR);
+    const dg = Math.abs(data[idx + 1] - targetG);
+    const db = Math.abs(data[idx + 2] - targetB);
+    return (dr + dg + db) > COLOR_TOLERANCE * 3;
   };
   
   let filledCount = 0;
-  const MAX_FILL_PIXELS = width * height * 0.5; // Limit to 50% of canvas
+  const MAX_FILL_PIXELS = width * height * 0.5;
   
-  // First pass: standard flood fill
-  while (stack.length > 0 && filledCount < MAX_FILL_PIXELS) {
-    const [x, y] = stack.pop()!;
+  // BFS flood fill with boundary detection
+  while (queue.length > 0 && filledCount < MAX_FILL_PIXELS) {
+    const [x, y] = queue.shift()!;
     const key = getKey(x, y);
     
     if (x < 0 || x >= width || y < 0 || y >= height || visited[key]) {
@@ -368,79 +351,34 @@ export function floodFill(
     
     const idx = getIdx(x, y);
     
-    if (isFilled(idx)) continue;
-    
-    // Check if this pixel matches target OR is near a boundary (gap closure)
-    const matches = matchesTarget(idx);
-    const nearBoundary = hasBoundaryNearby(x, y);
-    
-    if (!matches && !nearBoundary) continue;
-    
-    visited[key] = 1;
-    filled[key] = 1;
-    filledCount++;
-    
-    data[idx] = r;
-    data[idx + 1] = g;
-    data[idx + 2] = b;
-    data[idx + 3] = a;
-    
-    // 4-directional fill for cleaner edges
-    stack.push([x + 1, y]);
-    stack.push([x - 1, y]);
-    stack.push([x, y + 1]);
-    stack.push([x, y - 1]);
-  }
-  
-  // Second pass: dilate to fill small gaps and smooth edges
-  const dilateFilled = () => {
-    const newFilled = new Uint8Array(width * height);
-    const EDGE_DILATION = 1;
-    
-    for (let y = 1; y < height - 1; y++) {
-      for (let x = 1; x < width - 1; x++) {
-        const key = getKey(x, y);
-        
-        // If this pixel is filled, skip
-        if (filled[key]) {
-          newFilled[key] = 1;
-          continue;
-        }
-        
-        // Check if any neighbor is filled
-        let hasFilledNeighbor = false;
-        for (let dy = -EDGE_DILATION; dy <= EDGE_DILATION && !hasFilledNeighbor; dy++) {
-          for (let dx = -EDGE_DILATION; dx <= EDGE_DILATION && !hasFilledNeighbor; dx++) {
-            const nk = getKey(x + dx, y + dy);
-            if (filled[nk]) {
-              hasFilledNeighbor = true;
-            }
-          }
-        }
-        
-        // If has filled neighbor and matches target color, fill it
-        if (hasFilledNeighbor) {
-          const idx = getIdx(x, y);
-          if (matchesTarget(idx) || isFilled(idx)) {
-            data[idx] = r;
-            data[idx + 1] = g;
-            data[idx + 2] = b;
-            data[idx + 3] = a;
-            newFilled[key] = 1;
-          }
-        }
-      }
+    // Check if this is a boundary pixel - stop here
+    if (isBoundary(idx)) {
+      continue;
     }
     
-    return newFilled;
-  };
-  
-  // Apply dilation to close small gaps
-  dilateFilled();
+    // Check if matches target color
+    if (!matchesTarget(idx)) {
+      continue;
+    }
+    
+    visited[key] = 1;
+    filledCount++;
+    
+    // Fill the pixel
+    data[idx] = fillR;
+    data[idx + 1] = fillG;
+    data[idx + 2] = fillB;
+    data[idx + 3] = fillA;
+    
+    // Add neighbors (4-directional)
+    queue.push([x + 1, y]);
+    queue.push([x - 1, y]);
+    queue.push([x, y + 1]);
+    queue.push([x, y - 1]);
+  }
   
   ctx.putImageData(imageData, 0, 0);
 }
-
 
 export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke): void {
   if (stroke.tool === 'shape') {

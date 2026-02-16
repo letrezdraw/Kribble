@@ -20,8 +20,10 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
 
   useEffect(() => {
-    // Use empty string for same-origin (works when Express serves the client)
-    const SOCKET_URL = '';
+    // Use environment variable for socket URL (set in .env.development or .env.production)
+    // Falls back to empty string for same-origin requests in production
+    const SOCKET_URL = import.meta.env.VITE_API_URL || '';
+
 
     const newSocket = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],

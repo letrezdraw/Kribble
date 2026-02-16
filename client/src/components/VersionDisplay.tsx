@@ -1,8 +1,9 @@
 import './VersionDisplay.css';
+import packageJson from '../../package.json';
 
-// Auto-generated version - updates on every build
-const BUILD_VERSION = '1.0.0-ec2cdac-20250216';
-const BUILD_DATE = '2025-02-16T21:35:00Z';
+// Get version from package.json
+const BUILD_VERSION = packageJson.version;
+const BUILD_DATE = new Date().toISOString().split('T')[0]; // Today's date
 
 
 export default function VersionDisplay() {

@@ -8,7 +8,9 @@ import { useSocket } from '../../contexts/SocketContext';
 import Button from '../../components/Button';
 import CreateRoomMobile from './CreateRoomMobile';
 import { getRankByLevel } from '../../utils/ranks';
+import api from '../../services/api';
 import './LobbyMobile.css';
+
 
 
 
@@ -39,16 +41,17 @@ export default function LobbyMobile() {
   }, []);
 
   const fetchOnlineCount = async () => {
-    try { const res = await fetch('/api/users/online/count'); if (res.ok) { const data = await res.json(); setOnlineCount(data.count); } } catch {}
+    try { const res = await api.get('/users/online/count'); setOnlineCount(res.data.count); } catch {}
   };
 
   const fetchLeaderboard = async () => {
-    try { const res = await fetch('/api/users/leaderboard?limit=5'); if (res.ok) { const data = await res.json(); setLeaderboard(data.leaderboard); } } catch {}
+    try { const res = await api.get('/users/leaderboard?limit=5'); setLeaderboard(res.data.leaderboard); } catch {}
   };
 
   const fetchRooms = async () => {
-    try { const res = await fetch('/api/rooms'); if (res.ok) { const data = await res.json(); setRooms(data.rooms || []); } } catch {}
+    try { const res = await api.get('/rooms'); setRooms(res.data.rooms || []); } catch {}
   };
+
 
   const handleJoinRoom = (room: Room) => {
     if (room.isPrivate) { setSelectedRoom(room); setShowPasswordModal(true); setPasswordInput(''); }

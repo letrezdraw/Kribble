@@ -11,6 +11,83 @@ const socketToRoom: Map<string, string> = new Map();
 
 // Track active timers per room
 const roomTimers = new Map<string, NodeJS.Timeout>();
+// Track hint timers per room
+const roomHintTimers = new Map<string, NodeJS.Timeout[]>();
+
+
+// Track pending join operations to prevent race conditions
+const pendingJoins = new Map<string, boolean>();
+
+// Track rooms pending deletion (grace period)
+const roomsPendingDeletion = new Map<string, NodeJS.Timeout>();
+// Track players pending removal (grace period for reconnection)
+const playersPendingRemoval = new Map<string, NodeJS.Timeout>();
+// Track drawer disconnection state
+const drawerDisconnectionState = new Map<string, {
+  disconnectedAt: number;
+  pausedTimer: NodeJS.Timeout | null;
+  drawingData: any;
+}>();
+
+// Reconnection windows
+const RECONNECT_WINDOW_NORMAL = 60000; // 60 seconds for regular players
+const RECONNECT_WINDOW_DRAWER = 90000; // 90 seconds for drawer (pauses round)
+
+// Helper function to deduplicate players by userId
+function deduplicatePlayers(room: Room, keepSocketId: string): void {
+  if (!room || !room.players) return;
+  
+  const seenUserIds = new Map<string, number>(); // userId -> index to keep
+  
+  // First pass: identify duplicates and keep the one matching keepSocketId
+  const indicesToRemove: number[] = [];
+  
+  for (let i = 0; i < room.players.length; i++) {
+    const player = room.players[i];
+    // Only deduplicate players with actual userIds (not guest player- IDs)
+    if (!player.id || player.id.startsWith('player-')) continue;
+    
+    if (seenUserIds.has(player.id)) {
+      // This is a duplicate - check if we should keep this one or the previous
+      const existingIndex = seenUserIds.get(player.id)!;
+      const existingPlayer = room.players[existingIndex];
+      
+      // Keep the one that matches keepSocketId, or the non-disconnected one
+      if (player.socketId === keepSocketId) {
+        // Keep current, mark existing for removal
+        indicesToRemove.push(existingIndex);
+        seenUserIds.set(player.id, i);
+      } else if (existingPlayer.socketId === keepSocketId) {
+        // Keep existing, mark current for removal
+        indicesToRemove.push(i);
+      } else if (player.disconnected && !existingPlayer.disconnected) {
+        // Keep existing (connected), mark current for removal
+        indicesToRemove.push(i);
+      } else if (!player.disconnected && existingPlayer.disconnected) {
+        // Keep current (connected), mark existing for removal
+        indicesToRemove.push(existingIndex);
+        seenUserIds.set(player.id, i);
+      } else {
+        // Both same status, keep the newer one (higher index)
+        indicesToRemove.push(existingIndex);
+        seenUserIds.set(player.id, i);
+      }
+    } else {
+      seenUserIds.set(player.id, i);
+    }
+  }
+  
+  // Remove duplicates (in reverse order to maintain indices)
+  if (indicesToRemove.length > 0) {
+    console.log('[deduplicatePlayers] Removing duplicate entries at indices:', indicesToRemove);
+    // Sort in descending order
+    indicesToRemove.sort((a, b) => b - a);
+    for (const index of indicesToRemove) {
+      const removed = room.players.splice(index, 1)[0];
+      console.log('[deduplicatePlayers] Removed duplicate player:', removed.username, 'socket:', removed.socketId);
+    }
+  }
+}
 
 
 // Expanded word list with meaningful words from around the world
@@ -189,10 +266,25 @@ export function setupSocketHandlers(io: Server) {
     socket.on('room:join', (data: { roomId: string; password?: string; username?: string; joinByCode?: boolean; userId?: string }) => {
       console.log('[room:join] Attempting to join room:', data.roomId, 'username:', data.username, 'userId:', data.userId, 'joinByCode:', data.joinByCode);
 
+      // CRITICAL FIX: Prevent race condition - check if join is already in progress for this user
+      if (data.userId && pendingJoins.has(data.userId)) {
+        console.log('[room:join] Join already in progress for user:', data.userId, 'ignoring duplicate request');
+        return;
+      }
+      
+      // Mark join as in progress
+      if (data.userId) {
+        pendingJoins.set(data.userId, true);
+      }
+
       // Validate username if provided
       if (data.username) {
         const usernameValidation = validateUsername(data.username);
         if (!usernameValidation.valid) {
+          // Clear pending join on error
+          if (data.userId) {
+            pendingJoins.delete(data.userId);
+          }
           socket.emit('room:error', { message: usernameValidation.error });
           return;
         }
@@ -219,22 +311,73 @@ export function setupSocketHandlers(io: Server) {
         roomsPendingDeletion.delete(data.roomId);
       }
 
-
       
       if (!room) {
         console.log('[room:join] Room not found:', data.roomId);
+        // Clear pending join on error
+        if (data.userId) {
+          pendingJoins.delete(data.userId);
+        }
         socket.emit('room:error', { message: 'Room not found' });
         return;
       }
+
 
       // Check if player is already in the room (by socket ID or user ID)
       const existingPlayer = room.players.find(p => p.socketId === socket.id || (data.userId && p.id === data.userId));
       if (existingPlayer) {
         console.log('[room:join] Player already in room (rejoining):', existingPlayer.id);
+        
+        // CRITICAL FIX: Remove any old disconnected entries for this userId to prevent duplicates
+        if (data.userId) {
+          const oldEntries = room.players.filter(p => p.id === data.userId && p.socketId !== socket.id);
+          for (const oldEntry of oldEntries) {
+            console.log('[room:join] Removing old disconnected entry for player:', oldEntry.username, 'socket:', oldEntry.socketId);
+            const oldIndex = room.players.findIndex(p => p.socketId === oldEntry.socketId);
+            if (oldIndex !== -1) {
+              room.players.splice(oldIndex, 1);
+            }
+            // Clear any pending removal timer for old entry
+            const oldRemovalTimeout = playersPendingRemoval.get(oldEntry.id);
+            if (oldRemovalTimeout) {
+              clearTimeout(oldRemovalTimeout);
+              playersPendingRemoval.delete(oldEntry.id);
+            }
+          }
+        }
+        
+        // CRITICAL FIX: Clear any pending removal timer for this player
+        const existingRemovalTimeout = playersPendingRemoval.get(existingPlayer.id);
+        if (existingRemovalTimeout) {
+          console.log('[room:join] Clearing pending removal timer for reconnected player:', existingPlayer.username);
+          clearTimeout(existingRemovalTimeout);
+          playersPendingRemoval.delete(existingPlayer.id);
+        }
+        
+        // Mark player as reconnected (no longer disconnected)
+        existingPlayer.disconnected = false;
+        existingPlayer.disconnectedAt = undefined;
+        
         // Update socket ID in case it changed
         existingPlayer.socketId = socket.id;
         socketToRoom.set(socket.id, data.roomId);
         socket.join(data.roomId);
+        
+        // Deduplicate players to ensure no duplicates
+        deduplicatePlayers(room, socket.id);
+        
+        // Clear pending join lock
+        if (data.userId) {
+          pendingJoins.delete(data.userId);
+        }
+        
+        // Notify all players that player reconnected
+        io.to(data.roomId).emit('room:player-reconnected', {
+          playerId: existingPlayer.id,
+          username: existingPlayer.username
+        });
+        io.emit('room:updated');
+        
         socket.emit('room:joined', { 
           room: { 
             id: room.id, 
@@ -253,18 +396,93 @@ export function setupSocketHandlers(io: Server) {
       if (room.isPrivate && room.password && !data.joinByCode) {
         if (data.password !== room.password) {
           console.log('[room:join] Incorrect password for room:', data.roomId);
+          // Clear pending join on error
+          if (data.userId) {
+            pendingJoins.delete(data.userId);
+          }
           socket.emit('room:error', { message: 'Incorrect password' });
           return;
         }
       }
 
-
       
       if (room.players.length >= room.maxPlayers) {
         console.log('[room:join] Room is full:', data.roomId);
+        // Clear pending join on error
+        if (data.userId) {
+          pendingJoins.delete(data.userId);
+        }
         socket.emit('room:error', { message: 'Room is full' });
         return;
       }
+
+      
+      // CRITICAL FIX: Double-check for existing player by userId to prevent race condition duplicates
+      if (data.userId) {
+        const existingPlayerById = room.players.find(p => p.id === data.userId);
+        if (existingPlayerById) {
+          console.log('[room:join] RACE CONDITION: Player with userId already exists, treating as rejoin:', data.userId);
+          
+          // CRITICAL FIX: Remove any old disconnected entries for this userId to prevent duplicates
+          const oldEntries = room.players.filter(p => p.id === data.userId && p.socketId !== socket.id);
+          for (const oldEntry of oldEntries) {
+            console.log('[room:join] Removing old disconnected entry for player:', oldEntry.username, 'socket:', oldEntry.socketId);
+            const oldIndex = room.players.findIndex(p => p.socketId === oldEntry.socketId);
+            if (oldIndex !== -1) {
+              room.players.splice(oldIndex, 1);
+            }
+            // Clear any pending removal timer for old entry
+            const oldRemovalTimeout = playersPendingRemoval.get(oldEntry.id);
+            if (oldRemovalTimeout) {
+              clearTimeout(oldRemovalTimeout);
+              playersPendingRemoval.delete(oldEntry.id);
+            }
+          }
+          
+          // Clear any pending removal timer
+          const existingRemovalTimeout = playersPendingRemoval.get(existingPlayerById.id);
+          if (existingRemovalTimeout) {
+            clearTimeout(existingRemovalTimeout);
+            playersPendingRemoval.delete(existingPlayerById.id);
+          }
+          
+          // Mark as reconnected
+          existingPlayerById.disconnected = false;
+          existingPlayerById.disconnectedAt = undefined;
+          existingPlayerById.socketId = socket.id;
+          
+          socketToRoom.set(socket.id, data.roomId);
+          socket.join(data.roomId);
+          
+          // Deduplicate players to ensure no duplicates
+          deduplicatePlayers(room, socket.id);
+          
+          // Clear pending join lock
+          if (data.userId) {
+            pendingJoins.delete(data.userId);
+          }
+          
+          io.to(data.roomId).emit('room:player-reconnected', {
+            playerId: existingPlayerById.id,
+            username: existingPlayerById.username
+          });
+          io.emit('room:updated');
+          
+          socket.emit('room:joined', { 
+            room: { 
+              id: room.id, 
+              name: room.name, 
+              players: room.players.map(p => ({ id: p.id, username: p.username, avatarId: p.avatarId, score: p.score, isDrawer: p.isDrawer, isHost: p.isHost })),
+              maxPlayers: room.maxPlayers, 
+              settings: room.settings 
+            },
+            currentPlayerId: existingPlayerById.id
+          });
+          return;
+        }
+
+      }
+
       
       // Use actual userId if provided, otherwise generate a player ID
       const player: Player = {
@@ -277,13 +495,21 @@ export function setupSocketHandlers(io: Server) {
         isHost: room.players.length === 0,
       };
 
-
       
       room.players.push(player);
       console.log('[room:join] Added player:', player.id, 'Total players:', room.players.length);
+
+      // Deduplicate players to ensure no duplicates after adding new player
+      deduplicatePlayers(room, socket.id);
+      
+      // Clear pending join lock after successful join
+      if (data.userId) {
+        pendingJoins.delete(data.userId);
+      }
       
       socket.join(data.roomId);
       socketToRoom.set(socket.id, data.roomId);
+
       
       // Notify player
       socket.emit('room:joined', { 
@@ -359,8 +585,17 @@ export function setupSocketHandlers(io: Server) {
       console.log('[room:start] Emitting game:starting to room:', roomId);
       io.to(roomId).emit('game:starting', { round: room.gameState.currentRound, totalRounds: room.settings.rounds });
       
+      // Broadcast phase change to all clients
+      io.to(roomId).emit('PHASE_CHANGE', {
+        phase: 'selection',
+        round: room.gameState.currentRound,
+        totalRounds: room.settings.rounds,
+        drawerId: room.players[0]?.id
+      });
+      
       // Start word selection phase for first drawer
       startWordSelection(room, io);
+
     });
 
     // Handle word selection from drawer - MOVED INSIDE CONNECTION BLOCK
@@ -513,8 +748,7 @@ export function setupSocketHandlers(io: Server) {
         });
         
         // Emit to ALL players in room - just announce, no points yet
-        io.to(roomId).emit('game:guess-correct', { 
-
+        io.to(roomId).emit('game:guess-correct', {
           playerId: player.id, 
           username: player.username, 
           word: room.gameState.currentWord,
@@ -539,7 +773,6 @@ export function setupSocketHandlers(io: Server) {
           endRound(room, io);
         }
       } else {
-
         // Wrong guess - send to chat (broadcast to ALL including sender)
         console.log('[guess:submit] Wrong guess, broadcasting to all players in room:', roomId);
         io.to(roomId).emit('chat:message', { 
@@ -726,14 +959,17 @@ export function setupSocketHandlers(io: Server) {
       // Reset game state
       room.gameState = {
         phase: 'lobby',
-        currentRound: 0,
-        currentDrawerIndex: 0,
+        currentRound: 1,
+        currentTurn: 1,
+        currentDrawerIndex: -1,
         currentWord: '',
         wordHints: [],
         hintsRemaining: 3,
         timeRemaining: 0,
         totalRounds: room.settings.rounds,
+        totalTurns: room.players.length * room.settings.rounds,
       };
+
       
       // Reset player scores and flags
       room.players.forEach(p => {
@@ -764,22 +1000,6 @@ export function setupSocketHandlers(io: Server) {
     });
   });
 }
-
-// Track rooms pending deletion (grace period)
-const roomsPendingDeletion = new Map<string, NodeJS.Timeout>();
-// Track players pending removal (grace period for reconnection)
-const playersPendingRemoval = new Map<string, NodeJS.Timeout>();
-// Track drawer disconnection state
-const drawerDisconnectionState = new Map<string, {
-  disconnectedAt: number;
-  pausedTimer: NodeJS.Timeout | null;
-  drawingData: any;
-}>();
-
-// Reconnection windows
-const RECONNECT_WINDOW_NORMAL = 60000; // 60 seconds for regular players
-const RECONNECT_WINDOW_DRAWER = 90000; // 90 seconds for drawer (pauses round)
-
 
 function handlePlayerLeave(socket: Socket, io: Server, isIntentional: boolean = false) {
   console.log('[handlePlayerLeave] Socket leaving:', socket.id, 'intentional:', isIntentional);
@@ -1139,6 +1359,11 @@ function startWordSelection(room: Room, io: Server) {
     wordSelectionCountdowns.delete(room.id);
   }
   
+  // Clear canvas state for new round/drawer
+  room.canvasState = [];
+  io.to(room.id).emit('CLEAR_CANVAS');
+  console.log('[startWordSelection] Canvas cleared for new drawer');
+  
   // Select next drawer
   room.gameState.currentDrawerIndex = (room.gameState.currentDrawerIndex + 1) % room.players.length;
   const drawer = room.players[room.gameState.currentDrawerIndex];
@@ -1148,6 +1373,7 @@ function startWordSelection(room: Room, io: Server) {
   drawer.isDrawer = true;
   
   console.log('[startWordSelection] Drawer selected:', drawer.username, 'ID:', drawer.id);
+
   
   // Generate 5 word options for drawer
   const wordOptions = generateWordOptions(5);
@@ -1213,6 +1439,13 @@ function startDrawingPhase(room: Room, io: Server) {
     wordSelectionTimers.delete(room.id);
   }
   
+  // Clear any existing hint timers
+  const existingHintTimers = roomHintTimers.get(room.id);
+  if (existingHintTimers) {
+    existingHintTimers.forEach(timer => clearTimeout(timer));
+    roomHintTimers.delete(room.id);
+  }
+  
   // Reset hasGuessedCorrectly flag for all players
   room.players.forEach(p => {
     p.hasGuessedCorrectly = false;
@@ -1225,6 +1458,14 @@ function startDrawingPhase(room: Room, io: Server) {
   room.gameState.hintsRemaining = room.settings.hints || 3;
   room.gameState.timeRemaining = room.settings.roundTime;
   
+  // Broadcast phase change to all clients
+  io.to(room.id).emit('PHASE_CHANGE', {
+    phase: 'drawing',
+    drawerId: room.players[room.gameState.currentDrawerIndex]?.id,
+    wordLength: room.gameState.currentWord.length,
+    round: room.gameState.currentRound
+  });
+  
   // Emit word selected to all players
   io.to(room.id).emit('game:word-selected', { 
     word: room.gameState.currentWord, 
@@ -1233,6 +1474,77 @@ function startDrawingPhase(room: Room, io: Server) {
     drawTime: room.settings.roundTime
   });
 
+  // Set up automatic hint revelation
+  const hintsCount = room.settings.hints || 3;
+  const roundTime = room.settings.roundTime;
+  const hintTimers: NodeJS.Timeout[] = [];
+  
+  if (hintsCount > 0 && room.gameState.currentWord.length > 0) {
+    // Calculate intervals for hint revelation
+    // Distribute hints evenly throughout the round (excluding first and last 10 seconds)
+    const usableTime = Math.max(roundTime - 20, roundTime * 0.5); // At least 50% of round time
+    const intervalBetweenHints = usableTime / (hintsCount + 1);
+    
+    console.log(`[startDrawingPhase] Setting up ${hintsCount} automatic hints for word "${room.gameState.currentWord}"`);
+    console.log(`[startDrawingPhase] Round time: ${roundTime}s, interval: ${intervalBetweenHints.toFixed(1)}s`);
+    
+    for (let i = 0; i < hintsCount; i++) {
+      const hintDelay = 10000 + (intervalBetweenHints * 1000 * (i + 1)); // Start after 10s, then intervals
+      
+      const hintTimer = setTimeout(() => {
+        // Only reveal hint if still in drawing phase
+        if (room.gameState.phase !== 'drawing') {
+          console.log(`[autoHint] Skipping hint ${i + 1} - not in drawing phase`);
+          return;
+        }
+        
+        // Generate and reveal a new hint
+        const word = room.gameState.currentWord;
+        const hiddenIndices: number[] = [];
+        
+        // Find indices that are still hidden
+        for (let j = 0; j < word.length; j++) {
+          if (room.gameState.wordHints[j] === '_') {
+            hiddenIndices.push(j);
+          }
+        }
+        
+        if (hiddenIndices.length === 0) {
+          console.log(`[autoHint] No more hidden characters to reveal`);
+          return;
+        }
+        
+        // Randomly select one hidden character to reveal
+        const randomIndex = hiddenIndices[Math.floor(Math.random() * hiddenIndices.length)];
+        room.gameState.wordHints[randomIndex] = word[randomIndex];
+        room.gameState.hintsRemaining--;
+        
+        console.log(`[autoHint] Revealed character at position ${randomIndex}: "${word[randomIndex]}"`);
+        console.log(`[autoHint] Current hints: ${room.gameState.wordHints.join(' ')}, remaining: ${room.gameState.hintsRemaining}`);
+        
+        // Broadcast hint update to all players
+        io.to(room.id).emit('game:hint-update', { 
+          hints: room.gameState.wordHints, 
+          hintsRemaining: room.gameState.hintsRemaining 
+        });
+        
+        // Also emit a system message about the hint
+        io.to(room.id).emit('chat:message', {
+          playerId: 'system',
+          username: 'System',
+          message: `💡 Hint revealed! The word now shows: ${room.gameState.wordHints.join(' ')}`,
+          timestamp: new Date(),
+          isSystem: true
+        });
+        
+      }, hintDelay);
+      
+      hintTimers.push(hintTimer);
+      console.log(`[startDrawingPhase] Scheduled hint ${i + 1} at ${(hintDelay / 1000).toFixed(1)}s`);
+    }
+    
+    roomHintTimers.set(room.id, hintTimers);
+  }
   
   // Start draw timer and store reference
   const timer = setInterval(() => {
@@ -1242,12 +1554,14 @@ function startDrawingPhase(room: Room, io: Server) {
     if (room.gameState.timeRemaining <= 0) {
       clearInterval(timer);
       roomTimers.delete(room.id);
-      endRound(room, io);
+      endTurn(room, io);
     }
+
   }, 1000);
   
   roomTimers.set(room.id, timer);
 }
+
 
 function startNewRound(room: Room, io: Server) {
   // Start word selection for next drawer
@@ -1262,9 +1576,25 @@ function endRound(room: Room, io: Server) {
     roomTimers.delete(room.id);
   }
   
+  // Clear hint timers
+  const hintTimers = roomHintTimers.get(room.id);
+  if (hintTimers) {
+    hintTimers.forEach(t => clearTimeout(t));
+    roomHintTimers.delete(room.id);
+  }
+
+  
   room.gameState.phase = 'roundEnd';
   
+  // Broadcast phase change to all clients
+  io.to(room.id).emit('PHASE_CHANGE', {
+    phase: 'roundEnd',
+    round: room.gameState.currentRound,
+    word: room.gameState.currentWord
+  });
+  
   // Calculate and award points based on guess order
+
   // First correct guess gets 100 + time bonus, second gets 90, third gets 80, etc.
   const correctGuessers = room.players.filter(p => p.hasGuessedCorrectly && !p.isDrawer);
   const timeRemaining = room.gameState.timeRemaining;
@@ -1304,16 +1634,33 @@ function endRound(room: Room, io: Server) {
     room.gameState.phase = 'selection';
     io.to(room.id).emit('game:starting', { round: room.gameState.currentRound, totalRounds: room.settings.rounds });
     
+    // Broadcast phase change to all clients
+    io.to(room.id).emit('PHASE_CHANGE', {
+      phase: 'selection',
+      round: room.gameState.currentRound,
+      totalRounds: room.settings.rounds,
+      drawerId: room.players[room.gameState.currentDrawerIndex]?.id
+    });
+    
     setTimeout(() => {
       startNewRound(room, io);
     }, 5000);
   }
+
 }
 
 async function endGame(room: Room, io: Server) {
   room.gameState.phase = 'gameEnd';
   
+  // Broadcast phase change to all clients
+  io.to(room.id).emit('PHASE_CHANGE', {
+    phase: 'gameEnd',
+    round: room.gameState.currentRound,
+    totalRounds: room.settings.rounds
+  });
+  
   const rankings = room.players
+
     .map(p => ({ playerId: p.id, username: p.username, score: p.score, avatarId: p.avatarId }))
     .sort((a, b) => b.score - a.score);
   
