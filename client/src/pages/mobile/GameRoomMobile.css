@@ -3,19 +3,27 @@
    ============================================ */
 
 .game-room-mobile {
-  min-height: 100vh;
-  height: 100vh;
+  min-height: 100dvh;
+  height: 100dvh;
   background: var(--bg-primary);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   position: fixed;
   inset: 0;
+  /* Support for mobile safe areas */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
 /* Fullscreen Mode */
 .game-room-mobile.fullscreen {
   padding: 0;
+  /* Keep safe area insets in fullscreen for notched devices */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .game-room-mobile.fullscreen .game-header {
@@ -268,8 +276,8 @@
 /* Floating Chat Button in Lobby */
 .floating-chat-btn {
   position: fixed;
-  bottom: 24px;
-  right: 24px;
+  bottom: max(24px, env(safe-area-inset-bottom));
+  right: max(24px, env(safe-area-inset-right));
   width: 56px;
   height: 56px;
   display: flex;
@@ -549,13 +557,15 @@
 /* Floating Toolbar */
 .floating-toolbar {
   position: absolute;
-  bottom: 8px;
+  bottom: max(8px, env(safe-area-inset-bottom));
   left: 8px;
   right: 8px;
   display: flex;
   flex-direction: column;
   gap: 6px;
   z-index: 5;
+  /* Prevent toolbar from going below viewport */
+  max-height: 35vh;
 }
 
 .toolbar-section {
@@ -700,7 +710,7 @@
 /* Toolbar Show Button */
 .toolbar-show-btn {
   position: absolute;
-  bottom: 16px;
+  bottom: max(16px, env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
   width: 52px;
@@ -872,9 +882,11 @@
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 24px 24px 0 0;
   z-index: 100;
-  max-height: 75vh;
+  max-height: 75dvh;
   display: flex;
   flex-direction: column;
+  /* Account for safe area */
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .sheet-header {
@@ -945,6 +957,7 @@
   align-items: center;
   gap: 10px;
   padding: 12px 16px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   background: var(--bg-secondary);
 }

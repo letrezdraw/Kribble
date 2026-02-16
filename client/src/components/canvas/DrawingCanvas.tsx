@@ -78,6 +78,11 @@ export default function DrawingCanvas({
   const needsRenderRef = useRef(false);
   const rafIdRef = useRef<number | null>(null);
 
+  // Gesture state machine for mobile
+  type GestureState = 'idle' | 'drawing' | 'panning' | 'zooming' | 'multi-touch';
+  const [gestureState, setGestureState] = useState<GestureState>('idle');
+  
+  // Legacy states for compatibility
   const [isDrawing, setIsDrawing] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [isZooming, setIsZooming] = useState(false);
@@ -597,7 +602,9 @@ export default function DrawingCanvas({
   const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const touchStartDistanceRef = useRef<number | null>(null);
   const touchStartTransformRef = useRef<Transform | null>(null);
+  const touchStartCenterRef = useRef<{ x: number; y: number } | null>(null);
   const isTouchDrawingRef = useRef(false);
+  const activeTouchesRef = useRef<Map<number, { x: number; y: number }>>(new Map());
 
   // Global window events for panning, zooming, and brush sizing
   useEffect(() => {
@@ -664,26 +671,60 @@ export default function DrawingCanvas({
     
     const touches = e.touches;
     
+    // Track all active touches
+    activeTouchesRef.current.clear();
+    for (let i = 0; i < touches.length; i++) {
+      activeTouchesRef.current.set(touches[i].identifier, {
+        x: touches[i].clientX,
+        y: touches[i].clientY
+      });
+    }
+    
     if (touches.length === 1) {
-      // Single touch - start drawing
-      const touch = touches[0];
-      touchStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
-      isTouchDrawingRef.current = true;
-      
-      // Start drawing
-      const pos = getPos(e as unknown as React.MouseEvent, containerRef, transformRef.current);
-      setIsDrawing(true);
-      shapeStartRef.current = pos;
-      currentStrokeRef.current = [{ 
-        x: pos.x, 
-        y: pos.y, 
-        pressure: 1,
-      }];
+      // Single touch - check if we should start drawing
+      // Only draw if not currently in a multi-touch gesture
+      if (gestureState === 'idle' || gestureState === 'drawing') {
+        const touch = touches[0];
+        touchStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
+        isTouchDrawingRef.current = true;
+        setGestureState('drawing');
+        
+        // Start drawing
+        const pos = getPos(e as unknown as React.MouseEvent, containerRef, transformRef.current);
+        setIsDrawing(true);
+        shapeStartRef.current = pos;
+        currentStrokeRef.current = [{ 
+          x: pos.x, 
+          y: pos.y, 
+          pressure: 1,
+        }];
+      }
     } else if (touches.length === 2) {
-      // Two finger touch - start pinch zoom or pan
+      // Two finger touch - start pinch zoom/pan gesture
+      // Cancel any ongoing drawing
+      if (isDrawing) {
+        setIsDrawing(false);
+        isTouchDrawingRef.current = false;
+        clearLiveCanvas();
+        currentStrokeRef.current = [];
+        lastRenderedIndexRef.current = 0;
+        shapeStartRef.current = null;
+      }
+      
+      setGestureState('multi-touch');
       isTouchDrawingRef.current = false;
       touchStartDistanceRef.current = getTouchDistance(touches);
       touchStartTransformRef.current = { ...transformRef.current };
+      
+      // Calculate center point of the two touches for panning
+      touchStartCenterRef.current = {
+        x: (touches[0].clientX + touches[1].clientX) / 2,
+        y: (touches[0].clientY + touches[1].clientY) / 2
+      };
+    } else if (touches.length > 2) {
+      // 3+ fingers - ignore
+      setGestureState('multi-touch');
+      isTouchDrawingRef.current = false;
     }
   };
 
@@ -693,8 +734,37 @@ export default function DrawingCanvas({
     
     const touches = e.touches;
     
-    if (touches.length === 1 && isTouchDrawingRef.current && isDrawing) {
-      // Single touch drawing
+    // Update tracked touches
+    for (let i = 0; i < touches.length; i++) {
+      activeTouchesRef.current.set(touches[i].identifier, {
+        x: touches[i].clientX,
+        y: touches[i].clientY
+      });
+    }
+    
+    // If we have 2+ fingers, ensure we're in multi-touch mode and NOT drawing
+    if (touches.length >= 2 && gestureState === 'drawing') {
+      // Cancel drawing immediately when second finger touches
+      setIsDrawing(false);
+      isTouchDrawingRef.current = false;
+      clearLiveCanvas();
+      currentStrokeRef.current = [];
+      lastRenderedIndexRef.current = 0;
+      shapeStartRef.current = null;
+      setGestureState('multi-touch');
+      
+      // Initialize zoom/pan tracking
+      touchStartDistanceRef.current = getTouchDistance(touches);
+      touchStartTransformRef.current = { ...transformRef.current };
+      touchStartCenterRef.current = {
+        x: (touches[0].clientX + touches[1].clientX) / 2,
+        y: (touches[0].clientY + touches[1].clientY) / 2
+      };
+      return;
+    }
+    
+    if (touches.length === 1 && gestureState === 'drawing' && isDrawing) {
+      // Single touch drawing - only if we're in drawing mode
       const touch = touches[0];
       const pos = getPos(e as unknown as React.MouseEvent, containerRef, transformRef.current);
       
@@ -722,32 +792,37 @@ export default function DrawingCanvas({
         );
       }
     } else if (touches.length === 2 && touchStartDistanceRef.current && touchStartTransformRef.current) {
-      // Two finger pinch zoom
+      // Two finger pinch zoom and pan
       const currentDistance = getTouchDistance(touches);
       const scaleFactor = currentDistance / touchStartDistanceRef.current;
       
-      // Calculate center point of pinch
-      const centerX = (touches[0].clientX + touches[1].clientX) / 2;
-      const centerY = (touches[0].clientY + touches[1].clientY) / 2;
+      // Calculate current center point
+      const currentCenterX = (touches[0].clientX + touches[1].clientX) / 2;
+      const currentCenterY = (touches[0].clientY + touches[1].clientY) / 2;
       
       const startTransform = touchStartTransformRef.current;
-      const newScale = Math.max(0.5, Math.min(3, startTransform.scale * scaleFactor));
+      const newScale = Math.max(0.25, Math.min(4, startTransform.scale * scaleFactor));
       
-      // Adjust translation to zoom towards center
+      // Calculate pan delta
       const viewportRect = containerRef.current?.getBoundingClientRect();
-      if (viewportRect) {
+      if (viewportRect && touchStartCenterRef.current) {
         const viewportCenterX = viewportRect.left + viewportRect.width / 2;
         const viewportCenterY = viewportRect.top + viewportRect.height / 2;
         
+        // Calculate how much the center has moved (pan)
+        const panDeltaX = currentCenterX - touchStartCenterRef.current.x;
+        const panDeltaY = currentCenterY - touchStartCenterRef.current.y;
+        
+        // Calculate zoom adjustment to keep zoom centered on the pinch point
         const scaleRatio = newScale / startTransform.scale;
-        const newTranslateX = centerX - viewportCenterX - (centerX - viewportCenterX - startTransform.translateX) * scaleRatio;
-        const newTranslateY = centerY - viewportCenterY - (centerY - viewportCenterY - startTransform.translateY) * scaleRatio;
+        const zoomAdjustX = (touchStartCenterRef.current.x - viewportCenterX - startTransform.translateX) * (scaleRatio - 1);
+        const zoomAdjustY = (touchStartCenterRef.current.y - viewportCenterY - startTransform.translateY) * (scaleRatio - 1);
         
         setTransform({
           ...startTransform,
           scale: newScale,
-          translateX: newTranslateX,
-          translateY: newTranslateY,
+          translateX: startTransform.translateX + panDeltaX + zoomAdjustX,
+          translateY: startTransform.translateY + panDeltaY + zoomAdjustY,
         });
       } else {
         setTransform({
@@ -763,14 +838,21 @@ export default function DrawingCanvas({
     
     const touches = e.touches;
     
-    // If no touches left, end drawing
+    // Remove ended touches from tracking
+    const changedTouches = e.changedTouches;
+    for (let i = 0; i < changedTouches.length; i++) {
+      activeTouchesRef.current.delete(changedTouches[i].identifier);
+    }
+    
+    // If no touches left, end everything
     if (touches.length === 0) {
-      if (isTouchDrawingRef.current && isDrawing) {
-        // End drawing stroke
+      // End drawing if we were drawing
+      if (gestureState === 'drawing' && isDrawing) {
         if (!staticCtxRef.current || !liveCtxRef.current || !socket) return;
         
         setIsDrawing(false);
         isTouchDrawingRef.current = false;
+        setGestureState('idle');
 
         let stroke: Stroke;
         if (['rect', 'circle', 'line'].includes(activeTool)) {
@@ -789,55 +871,57 @@ export default function DrawingCanvas({
           drawShape(staticCtxRef.current, stroke);
         } else if (activeTool === 'brush' || activeTool === 'eraser') {
           const points = currentStrokeRef.current;
-          const taperedPoints = applyTapering(points);
-          
-          stroke = {
-            id: Date.now().toString(),
-            tool: activeTool as ToolType,
-            points: samplePointsForStorage(taperedPoints),
-            color: brushColor,
-            size: brushSize,
-            opacity: brushOpacity,
-            pressureData: taperedPoints.map(p => p.pressure),
-          };
+          if (points.length > 0) {
+            const taperedPoints = applyTapering(points);
+            
+            stroke = {
+              id: Date.now().toString(),
+              tool: activeTool as ToolType,
+              points: samplePointsForStorage(taperedPoints),
+              color: brushColor,
+              size: brushSize,
+              opacity: brushOpacity,
+              pressureData: taperedPoints.map(p => p.pressure),
+            };
 
-          drawStroke(staticCtxRef.current, stroke);
+            drawStroke(staticCtxRef.current, stroke);
+          } else {
+            stroke = null as any;
+          }
         } else {
-          return; // No valid stroke
+          stroke = null as any;
         }
 
-        strokesRef.current.push(stroke);
-        redoStackRef.current = [];
-        socket.emit('draw:stroke', { stroke });
+        if (stroke) {
+          strokesRef.current.push(stroke);
+          redoStackRef.current = [];
+          socket.emit('draw:stroke', { stroke });
+        }
 
         clearLiveCanvas();
         currentStrokeRef.current = [];
         lastRenderedIndexRef.current = 0;
         shapeStartRef.current = null;
+      } else if (gestureState === 'multi-touch') {
+        // End multi-touch gesture
+        setGestureState('idle');
       }
       
-      // Reset touch refs
+      // Reset all touch refs
       touchStartRef.current = null;
       touchStartDistanceRef.current = null;
       touchStartTransformRef.current = null;
-    } else if (touches.length === 1) {
-      // Went from 2 fingers to 1 - switch to drawing mode
+      touchStartCenterRef.current = null;
+      isTouchDrawingRef.current = false;
+      activeTouchesRef.current.clear();
+    } else if (touches.length === 1 && gestureState === 'multi-touch') {
+      // Went from 2+ fingers to 1 - transition back to idle
+      // Don't immediately start drawing, wait for new touch start
+      setGestureState('idle');
       touchStartDistanceRef.current = null;
       touchStartTransformRef.current = null;
-      
-      if (!isTouchDrawingRef.current) {
-        // Start new drawing stroke
-        const touch = touches[0];
-        isTouchDrawingRef.current = true;
-        const pos = getPos(e as unknown as React.MouseEvent, containerRef, transformRef.current);
-        setIsDrawing(true);
-        shapeStartRef.current = pos;
-        currentStrokeRef.current = [{ 
-          x: pos.x, 
-          y: pos.y, 
-          pressure: 1,
-        }];
-      }
+      touchStartCenterRef.current = null;
+      isTouchDrawingRef.current = false;
     }
   };
 

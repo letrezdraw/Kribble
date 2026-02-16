@@ -128,7 +128,37 @@
   to { transform: rotate(360deg); }
 }
 
-/* Responsive */
+/* Mobile Touch Optimizations */
+@media (pointer: coarse) {
+  .canvas-container {
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+  
+  .canvas-viewport {
+    touch-action: none;
+  }
+  
+  .canvas-inner {
+    touch-action: none;
+  }
+  
+  .canvas-live {
+    touch-action: none;
+  }
+  
+  /* Larger hit areas for touch */
+  .canvas-control-btn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* Mobile-specific styles */
 @media (max-width: 768px) {
   .canvas-controls {
     top: var(--space-2);
@@ -136,7 +166,20 @@
   }
   
   .canvas-control-btn {
-    width: 32px;
-    height: 32px;
+    width: 40px;
+    height: 40px;
+  }
+  
+  /* Prevent text selection on mobile */
+  .canvas-container * {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Small phones */
+@media (max-width: 360px) {
+  .canvas-control-btn {
+    width: 36px;
+    height: 36px;
   }
 }
