@@ -4,6 +4,8 @@ import { getWordsByCategory, addMatchHistory, updatePlayerStats, incrementPlayer
 import { rooms, getRoom, deleteRoom, createRoom, Room, Player, RoomSettings, GameState } from '../data/rooms.js';
 import { guessRateLimiter, chatRateLimiter, drawRateLimiter } from '../utils/rateLimiter.js';
 import { validateMessage, validateUsername } from '../utils/profanityFilter.js';
+import { logger } from '../utils/logger.js';
+
 
 
 // Socket to room mapping
@@ -171,27 +173,34 @@ function generateHints(word: string, count: number): string[] {
 
 export function setupSocketHandlers(io: Server) {
   io.on('connection', (socket: Socket) => {
+    logger.socketEvent('connection', socket.id, { timestamp: new Date().toISOString() });
     console.log('[Socket] Client connected:', socket.id);
 
     // Debug: Log all incoming events
     socket.onAny((eventName, ...args) => {
+      logger.trace('SOCKET', `Event: ${eventName}`, { args: args.length > 0 ? args : undefined }, undefined, socket.id);
       console.log(`[Socket ${socket.id}] Event: ${eventName}`, args);
     });
 
+
     // Room management
     socket.on('room:create', (data: { name: string; settings: Partial<RoomSettings>; username?: string; userId?: string }) => {
+      logger.socketEvent('room:create', socket.id, { roomName: data.name, username: data.username, userId: data.userId });
       console.log('[room:create] Creating room:', data.name, 'username:', data.username, 'userId:', data.userId);
       
       // Validate username
       const usernameValidation = validateUsername(data.username || 'Player1');
       if (!usernameValidation.valid) {
+        logger.warn('SOCKET', 'Room creation failed: Invalid username', { username: data.username, error: usernameValidation.error });
         socket.emit('room:error', { message: usernameValidation.error });
         return;
       }
+
       
       // Check if socket is already in a room - leave it first
       const existingRoomId = socketToRoom.get(socket.id);
       if (existingRoomId) {
+        logger.trace('SOCKET', 'Leaving existing room before creating new one', { existingRoomId }, data.userId, socket.id);
         console.log('[room:create] Socket already in room:', existingRoomId, '- leaving first');
         const existingRoom = getRoom(existingRoomId);
         if (existingRoom) {
@@ -210,6 +219,8 @@ export function setupSocketHandlers(io: Server) {
       }
       
       const room = createRoom(data.name, data.settings);
+      logger.gameState(room.id, 'ROOM_CREATED', { roomName: data.name, host: data.username, settings: data.settings });
+
       
       // Ensure room starts in lobby phase
       room.gameState.phase = 'lobby';
@@ -230,9 +241,11 @@ export function setupSocketHandlers(io: Server) {
       };
       
       room.players.push(hostPlayer);
+      logger.userAction(hostPlayer.id, 'HOST_JOINED', { roomId: room.id, username: hostPlayer.username });
       console.log('[room:create] Added host player:', hostPlayer.id, 'Total players:', room.players.length);
       
       socket.join(room.id);
+
       socketToRoom.set(socket.id, room.id);
       
       // Notify all clients that room list changed
@@ -264,13 +277,16 @@ export function setupSocketHandlers(io: Server) {
 
 
     socket.on('room:join', (data: { roomId: string; password?: string; username?: string; joinByCode?: boolean; userId?: string }) => {
+      logger.socketEvent('room:join', socket.id, { roomId: data.roomId, username: data.username, userId: data.userId, joinByCode: data.joinByCode });
       console.log('[room:join] Attempting to join room:', data.roomId, 'username:', data.username, 'userId:', data.userId, 'joinByCode:', data.joinByCode);
 
       // CRITICAL FIX: Prevent race condition - check if join is already in progress for this user
       if (data.userId && pendingJoins.has(data.userId)) {
+        logger.warn('SOCKET', 'Join already in progress, ignoring duplicate', { userId: data.userId, roomId: data.roomId });
         console.log('[room:join] Join already in progress for user:', data.userId, 'ignoring duplicate request');
         return;
       }
+
       
       // Mark join as in progress
       if (data.userId) {
@@ -281,6 +297,7 @@ export function setupSocketHandlers(io: Server) {
       if (data.username) {
         const usernameValidation = validateUsername(data.username);
         if (!usernameValidation.valid) {
+          logger.warn('SOCKET', 'Join failed: Invalid username', { username: data.username, error: usernameValidation.error });
           // Clear pending join on error
           if (data.userId) {
             pendingJoins.delete(data.userId);
@@ -289,6 +306,7 @@ export function setupSocketHandlers(io: Server) {
           return;
         }
       }
+
 
       
       // Try to find room by exact match first, then by partial match (for room code joining)
@@ -313,6 +331,7 @@ export function setupSocketHandlers(io: Server) {
 
       
       if (!room) {
+        logger.warn('SOCKET', 'Join failed: Room not found', { roomId: data.roomId });
         console.log('[room:join] Room not found:', data.roomId);
         // Clear pending join on error
         if (data.userId) {
@@ -321,6 +340,7 @@ export function setupSocketHandlers(io: Server) {
         socket.emit('room:error', { message: 'Room not found' });
         return;
       }
+
 
 
       // Check if player is already in the room (by socket ID or user ID)
@@ -395,6 +415,7 @@ export function setupSocketHandlers(io: Server) {
       // Check password for private rooms (skip if joining by room code or player is already in room)
       if (room.isPrivate && room.password && !data.joinByCode) {
         if (data.password !== room.password) {
+          logger.warn('SOCKET', 'Join failed: Incorrect password', { roomId: data.roomId, userId: data.userId });
           console.log('[room:join] Incorrect password for room:', data.roomId);
           // Clear pending join on error
           if (data.userId) {
@@ -407,6 +428,7 @@ export function setupSocketHandlers(io: Server) {
 
       
       if (room.players.length >= room.maxPlayers) {
+        logger.warn('SOCKET', 'Join failed: Room is full', { roomId: data.roomId, currentPlayers: room.players.length, maxPlayers: room.maxPlayers });
         console.log('[room:join] Room is full:', data.roomId);
         // Clear pending join on error
         if (data.userId) {
@@ -415,6 +437,7 @@ export function setupSocketHandlers(io: Server) {
         socket.emit('room:error', { message: 'Room is full' });
         return;
       }
+
 
       
       // CRITICAL FIX: Double-check for existing player by userId to prevent race condition duplicates
@@ -497,6 +520,7 @@ export function setupSocketHandlers(io: Server) {
 
       
       room.players.push(player);
+      logger.userAction(player.id, 'PLAYER_JOINED', { roomId: room.id, username: player.username, totalPlayers: room.players.length });
       console.log('[room:join] Added player:', player.id, 'Total players:', room.players.length);
 
       // Deduplicate players to ensure no duplicates after adding new player
@@ -506,6 +530,7 @@ export function setupSocketHandlers(io: Server) {
       if (data.userId) {
         pendingJoins.delete(data.userId);
       }
+
       
       socket.join(data.roomId);
       socketToRoom.set(socket.id, data.roomId);
@@ -580,18 +605,22 @@ export function setupSocketHandlers(io: Server) {
       // Notify all clients that room list changed
       io.emit('room:updated');
       
+      logger.info('SOCKET', 'Player joined room successfully', { roomId: data.roomId, playerId: player.id, username: player.username });
       console.log('[room:join] Player joined room successfully:', data.roomId);
     });
+
 
     socket.on('room:leave', () => {
       handlePlayerLeave(socket, io, true); // true = intentional leave
     });
 
     socket.on('room:start', () => {
+      logger.socketEvent('room:start', socket.id, { action: 'game_start_request' });
       console.log('[room:start] received from socket:', socket.id);
       const roomId = socketToRoom.get(socket.id);
       console.log('[room:start] Room ID from socketToRoom:', roomId);
       if (!roomId) {
+        logger.warn('SOCKET', 'Game start failed: No room found for socket', { socketId: socket.id });
         console.log('[room:start] No room ID found for socket');
         return;
       }
@@ -599,6 +628,7 @@ export function setupSocketHandlers(io: Server) {
       const room = getRoom(roomId);
       console.log('[room:start] Room found:', room?.id, 'Players:', room?.players.length);
       if (!room) {
+        logger.warn('SOCKET', 'Game start failed: Room not found', { roomId });
         console.log('[room:start] Room not found');
         return;
       }
@@ -607,8 +637,10 @@ export function setupSocketHandlers(io: Server) {
       const isSolo = room.players.length === 1 || room.settings.gameMode === 'solo';
       
       if (isSolo) {
+        logger.gameState(roomId, 'SOLO_MODE_STARTED', { playerCount: room.players.length });
         console.log('[room:start] Solo play detected - entering free draw mode');
         room.gameState.phase = 'freeDraw';
+
         
         // Make room private when starting solo
         room.isPrivate = true;
@@ -633,7 +665,9 @@ export function setupSocketHandlers(io: Server) {
       room.gameState.currentRound = 1;
       room.gameState.currentDrawerIndex = 0;
       
+      logger.gameState(roomId, 'GAME_STARTED', { round: 1, totalRounds: room.settings.rounds, playerCount: room.players.length });
       console.log('[room:start] Emitting game:starting to room:', roomId);
+
       io.to(roomId).emit('game:starting', { round: room.gameState.currentRound, totalRounds: room.settings.rounds });
       
       // Broadcast phase change to all clients
@@ -660,23 +694,27 @@ export function setupSocketHandlers(io: Server) {
       // Verify sender is the drawer
       const player = room.players.find(p => p.socketId === socket.id);
       if (!player || !player.isDrawer) {
+        logger.warn('SOCKET', 'Word selection failed: Not the drawer', { socketId: socket.id, roomId });
         socket.emit('room:error', { message: 'Only the drawer can select the word' });
         return;
       }
       
       // Verify we're in selection phase
       if (room.gameState.phase !== 'selection') {
+        logger.warn('SOCKET', 'Word selection failed: Not in selection phase', { roomId, currentPhase: room.gameState.phase });
         socket.emit('room:error', { message: 'Not in word selection phase' });
         return;
       }
       
       // Set the selected word
       room.gameState.currentWord = data.word;
+      logger.gameState(roomId, 'WORD_SELECTED', { word: data.word, drawer: player.username });
       console.log('[game:select-word] Drawer selected word:', data.word);
       
       // Start drawing phase
       startDrawingPhase(room, io);
     });
+
 
     // Drawing events
     socket.on('draw:stroke', (data: { stroke: any }) => {
@@ -717,14 +755,17 @@ export function setupSocketHandlers(io: Server) {
 
     // Game events
     socket.on('guess:submit', (data: { guess: string }) => {
+      logger.socketEvent('guess:submit', socket.id, { guess: data.guess });
       console.log('[guess:submit] Received from socket:', socket.id, 'guess:', data.guess);
       
       // Rate limiting
       if (!guessRateLimiter.canProceed(socket.id)) {
+        logger.warn('SOCKET', 'Guess rate limit exceeded', { socketId: socket.id });
         console.log('[guess:submit] Rate limit exceeded for socket:', socket.id);
         socket.emit('chat:system', { message: 'Too many guesses. Please slow down.' });
         return;
       }
+
       
       const roomId = socketToRoom.get(socket.id);
       if (!roomId) {
@@ -783,30 +824,60 @@ export function setupSocketHandlers(io: Server) {
 
       
       if (guessLower === wordLower) {
-        // Correct guess - mark player but don't award points yet
+        // Correct guess - mark player and award points immediately
         player.hasGuessedCorrectly = true;
         
-        // Track guess order for round-end scoring (first guesser gets more points)
+        // Track guess order for scoring (first guesser gets more points)
         const guessOrder = room.players.filter(p => p.hasGuessedCorrectly && !p.isDrawer).length;
         
-        console.log('[guess:submit] CORRECT GUESS! Player:', player.username, 'Guess order:', guessOrder);
+        // Calculate points immediately based on guess order and time remaining
+        const basePoints = Math.max(100 - ((guessOrder - 1) * 10), 10); // First: 100, Second: 90, etc.
+        const timeBonus = Math.floor(room.gameState.timeRemaining / 10);
+        const totalPoints = basePoints + timeBonus;
+        
+        // Award points immediately
+        player.score += totalPoints;
+        
+        logger.gameState(roomId, 'CORRECT_GUESS', { 
+          playerId: player.id, 
+          username: player.username, 
+          guessOrder, 
+          points: totalPoints,
+          word: room.gameState.currentWord 
+        });
+        console.log('[guess:submit] CORRECT GUESS! Player:', player.username, 'Guess order:', guessOrder, 'Points:', totalPoints);
+
         
         // Emit chat message for correct guess
         io.to(roomId).emit('chat:message', { 
           playerId: 'system', 
           username: 'System', 
-          message: `${player.username} guessed the word!`, 
+          message: `${player.username} guessed the word! (+${totalPoints} pts)`, 
           timestamp: new Date(),
           isCorrect: true
         });
         
-        // Emit to ALL players in room - just announce, no points yet
+        // Emit to ALL players in room with actual points and updated scores
         io.to(roomId).emit('game:guess-correct', {
           playerId: player.id, 
           username: player.username, 
           word: room.gameState.currentWord,
-          points: 0 // Don't reveal points yet
+          points: totalPoints,
+          scores: room.players.map(p => ({ playerId: p.id, score: p.score }))
         });
+        
+        // Also emit updated player list so everyone sees new scores
+        io.to(roomId).emit('room:players-updated', { 
+          players: room.players.map(p => ({ 
+            id: p.id, 
+            username: p.username, 
+            avatarId: p.avatarId, 
+            score: p.score, 
+            isDrawer: p.isDrawer, 
+            isHost: p.isHost 
+          })) 
+        });
+
         
         console.log('[guess:submit] guess-correct event emitted to room:', roomId);
         
@@ -815,6 +886,7 @@ export function setupSocketHandlers(io: Server) {
         const allGuessedCorrectly = nonDrawerPlayers.every(p => p.hasGuessedCorrectly);
         
         if (allGuessedCorrectly) {
+          logger.gameState(roomId, 'ALL_GUESSED_CORRECTLY', { roundEnding: true });
           console.log('[guess:submit] All players guessed correctly! Ending round early');
           // Clear the timer
           const timer = roomTimers.get(roomId);
@@ -826,6 +898,8 @@ export function setupSocketHandlers(io: Server) {
           endRound(room, io);
         }
       } else {
+        logger.trace('SOCKET', 'Wrong guess', { playerId: player.id, guess: data.guess }, player.id);
+
         // Wrong guess - send to chat (broadcast to ALL including sender)
         console.log('[guess:submit] Wrong guess, broadcasting to all players in room:', roomId);
         io.to(roomId).emit('chat:message', { 
@@ -853,14 +927,17 @@ export function setupSocketHandlers(io: Server) {
     });
 
     socket.on('chat:message', (data: { message: string }) => {
+      logger.socketEvent('chat:message', socket.id, { message: data.message });
       console.log('[chat:message] Received from socket:', socket.id, 'message:', data.message);
       
       // Rate limiting
       if (!chatRateLimiter.canProceed(socket.id)) {
+        logger.warn('SOCKET', 'Chat rate limit exceeded', { socketId: socket.id });
         console.log('[chat:message] Rate limit exceeded for socket:', socket.id);
         socket.emit('chat:system', { message: 'Too many messages. Please slow down.' });
         return;
       }
+
       
       const roomId = socketToRoom.get(socket.id);
       if (!roomId) {
@@ -1048,20 +1125,25 @@ export function setupSocketHandlers(io: Server) {
 
 
     socket.on('disconnect', () => {
+      logger.socketEvent('disconnect', socket.id, { timestamp: new Date().toISOString() });
       console.log('[Socket] Client disconnected:', socket.id);
       handlePlayerLeave(socket, io, false); // false = disconnect (grace period)
     });
   });
 }
 
+
 function handlePlayerLeave(socket: Socket, io: Server, isIntentional: boolean = false) {
+  logger.socketEvent('player:leave', socket.id, { intentional: isIntentional });
   console.log('[handlePlayerLeave] Socket leaving:', socket.id, 'intentional:', isIntentional);
   
   const roomId = socketToRoom.get(socket.id);
   if (!roomId) {
+    logger.trace('SOCKET', 'Leave failed: No room found for socket', { socketId: socket.id });
     console.log('[handlePlayerLeave] No room found for socket');
     return;
   }
+
   
   const room = getRoom(roomId);
   if (!room) {
@@ -1082,11 +1164,21 @@ function handlePlayerLeave(socket: Socket, io: Server, isIntentional: boolean = 
   const wasDrawer = player.isDrawer;
   const playerId = player.id;
   
+  logger.userAction(playerId, 'PLAYER_LEAVE', { 
+    username: player.username, 
+    isHost: wasHost, 
+    isDrawer: wasDrawer, 
+    intentional: isIntentional,
+    roomId 
+  });
   console.log('[handlePlayerLeave] Player found:', player.username, 'isHost:', wasHost, 'isDrawer:', wasDrawer, 'index:', playerIndex);
+
   
   // If intentional leave, remove player immediately (no grace period)
   if (isIntentional) {
+    logger.info('SOCKET', 'Intentional leave - removing player immediately', { playerId, username: player.username });
     console.log('[handlePlayerLeave] Intentional leave - removing player immediately:', player.username);
+
     
     // Remove player from room immediately
     room.players.splice(playerIndex, 1);
@@ -1157,7 +1249,9 @@ function handlePlayerLeave(socket: Socket, io: Server, isIntentional: boolean = 
   
   // SPECIAL HANDLING FOR DRAWER DISCONNECTION
   if (wasDrawer && room.gameState.phase === 'drawing') {
+    logger.gameState(roomId, 'DRAWER_DISCONNECTED', { playerId, username: player.username });
     console.log('[handlePlayerLeave] DRAWER DISCONNECTED - pausing round:', player.username);
+
     
     // Pause the round timer
     const timer = roomTimers.get(roomId);
@@ -1803,6 +1897,10 @@ function endRound(room: Room, io: Server) {
 
 async function endGame(room: Room, io: Server) {
   room.gameState.phase = 'gameEnd';
+  logger.gameState(room.id, 'GAME_ENDED', { 
+    round: room.gameState.currentRound, 
+    finalScores: room.players.map(p => ({ id: p.id, username: p.username, score: p.score }))
+  });
   
   // Broadcast phase change to all clients
   io.to(room.id).emit('PHASE_CHANGE', {
@@ -1810,6 +1908,7 @@ async function endGame(room: Room, io: Server) {
     round: room.gameState.currentRound,
     totalRounds: room.settings.rounds
   });
+
   
   const rankings = room.players
 
@@ -1819,13 +1918,21 @@ async function endGame(room: Room, io: Server) {
   // Track match duration
   const matchDuration = Math.floor((Date.now() - room.createdAt.getTime()) / 60000);
   
-  // Award XP and save stats for all players
-  for (const player of room.players) {
-    const position = rankings.findIndex(r => r.playerId === player.id);
-    const isWinner = position === 0;
-    const xpGained = Math.max(10, 100 - (position * 20));
-    
-    console.log(`[endGame] Player ${player.username} gained ${xpGained} XP, position: ${position + 1}`);
+    // Award XP and save stats for all players
+    for (const player of room.players) {
+      const position = rankings.findIndex(r => r.playerId === player.id);
+      const isWinner = position === 0;
+      const xpGained = Math.max(10, 100 - (position * 20));
+      
+      logger.userAction(player.id, 'GAME_END_STATS', { 
+        username: player.username, 
+        position: position + 1, 
+        score: player.score, 
+        xpGained, 
+        isWinner 
+      });
+      console.log(`[endGame] Player ${player.username} gained ${xpGained} XP, position: ${position + 1}`);
+
     
     // Get current stats
     const currentStats = await getPlayerStats(player.id);

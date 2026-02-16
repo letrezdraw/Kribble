@@ -70,8 +70,22 @@ CREATE TABLE IF NOT EXISTS daily_challenges (
   UNIQUE(user_id, challenge_date, challenge_id)
 );
 
+-- Achievements table
+CREATE TABLE IF NOT EXISTS achievements (
+  id SERIAL PRIMARY KEY,
+  user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  achievement_id VARCHAR(50) NOT NULL,
+  title VARCHAR(100) NOT NULL,
+  description TEXT,
+  icon VARCHAR(50) DEFAULT '🏆',
+  unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, achievement_id)
+);
+
 -- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_achievements_user_id ON achievements(user_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_guest_expires ON users(is_guest, expires_at) WHERE is_guest = TRUE;
 CREATE INDEX IF NOT EXISTS idx_match_history_user_id ON match_history(user_id);

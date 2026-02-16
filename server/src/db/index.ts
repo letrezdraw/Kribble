@@ -38,19 +38,21 @@ class FileDB {
         this.data.player_stats = this.data.player_stats || {};
         this.data.match_history = this.data.match_history || [];
         this.data.daily_challenges = this.data.daily_challenges || {};
+        this.data.achievements = this.data.achievements || {};
       } else {
         this.data = {
           users: {},
           word_categories: {},
           player_stats: {},
           match_history: [],
-          daily_challenges: {}
+          daily_challenges: {},
+          achievements: {}
         };
         this.save();
       }
     } catch (e) {
       console.error('[DB] Error loading file DB:', e);
-      this.data = { users: {}, word_categories: {}, player_stats: {}, match_history: [], daily_challenges: {} };
+      this.data = { users: {}, word_categories: {}, player_stats: {}, match_history: [], daily_challenges: {}, achievements: {} };
     }
   }
 
@@ -103,6 +105,10 @@ class FileDB {
         if (lowerSql.includes('from player_stats')) {
           return this.data.player_stats[params[0]] || null;
         }
+        if (lowerSql.includes('from achievements')) {
+          const userId = params[0];
+          return this.data.achievements[userId] || null;
+        }
         return null;
       },
       
@@ -129,6 +135,10 @@ class FileDB {
           }));
           return users.sort((a: any, b: any) => b.xp - a.xp).slice(0, params[0] || 100);
         }
+        if (lowerSql.includes('from achievements')) {
+          const userId = params[0];
+          return this.data.achievements[userId] ? Object.values(this.data.achievements[userId]) : [];
+        }
         return [];
       },
       
@@ -149,6 +159,7 @@ class FileDB {
           if (this.data.users[userId]) {
             if (lowerSql.includes('username')) this.data.users[userId].username = params[0];
             if (lowerSql.includes('avatar_id')) this.data.users[userId].avatar_id = params[0];
+            if (lowerSql.includes('settings')) this.data.users[userId].settings = params[0];
             this.save();
             return { changes: 1 };
           }
@@ -187,6 +198,22 @@ class FileDB {
           }
           this.save();
           return { lastInsertRowid: id, changes: 1 };
+        }
+        if (lowerSql.includes('insert into achievements')) {
+          const [userId, achievementId, title, description, icon] = params;
+          if (!this.data.achievements[userId]) {
+            this.data.achievements[userId] = {};
+          }
+          this.data.achievements[userId][achievementId] = {
+            user_id: userId,
+            achievement_id: achievementId,
+            title,
+            description,
+            icon,
+            unlocked_at: new Date().toISOString()
+          };
+          this.save();
+          return { lastInsertRowid: 1, changes: 1 };
         }
         return { lastInsertRowid: 1, changes: 1 };
       }
@@ -623,4 +650,96 @@ export async function getWordCategories(): Promise<{ id: string; name: string }[
     id: c.id,
     name: c.name
   }));
+}
+
+// Achievement Functions
+export async function getAchievements(userId: string): Promise<any[]> {
+  const achievements = await query(
+    'SELECT * FROM achievements WHERE user_id = ? ORDER BY unlocked_at DESC',
+    [userId]
+  );
+  
+  return (Array.isArray(achievements) ? achievements : []).map(a => ({
+    id: a.achievement_id,
+    title: a.title,
+    description: a.description,
+    icon: a.icon,
+    unlockedAt: a.unlocked_at
+  }));
+}
+
+export async function unlockAchievement(userId: string, achievementId: string, title: string, description: string, icon: string = '🏆'): Promise<boolean> {
+  // Check if already unlocked
+  const existing = await queryOne(
+    'SELECT * FROM achievements WHERE user_id = ? AND achievement_id = ?',
+    [userId, achievementId]
+  );
+  
+  if (existing) return false; // Already unlocked
+  
+  // Unlock new achievement
+  await run(`
+    INSERT INTO achievements (user_id, achievement_id, title, description, icon)
+    VALUES (?, ?, ?, ?, ?)
+  `, [userId, achievementId, title, description, icon]);
+  
+  return true;
+}
+
+// Achievement definitions
+export const ACHIEVEMENTS = {
+  FIRST_WIN: { id: 'first_win', title: 'First Victory', description: 'Win your first game', icon: '🏆' },
+  WINNING_STREAK_3: { id: 'winning_streak_3', title: 'On Fire', description: 'Win 3 games in a row', icon: '🔥' },
+  WINNING_STREAK_5: { id: 'winning_streak_5', title: 'Unstoppable', description: 'Win 5 games in a row', icon: '⚡' },
+  MASTER_GUESSER: { id: 'master_guesser', title: 'Master Guesser', description: 'Guess 100 words correctly', icon: '🎯' },
+  MASTER_ARTIST: { id: 'master_artist', title: 'Master Artist', description: 'Draw 50 words that get guessed', icon: '🎨' },
+  SPEED_DEMON: { id: 'speed_demon', title: 'Speed Demon', description: 'Guess a word in under 5 seconds', icon: '⚡' },
+  SOCIAL_BUTTERFLY: { id: 'social_butterfly', title: 'Social Butterfly', description: 'Play 50 games', icon: '🦋' },
+  HIGH_SCORER: { id: 'high_scorer', title: 'High Scorer', description: 'Score 5000+ points in a single game', icon: '💎' },
+  PERFECT_GAME: { id: 'perfect_game', title: 'Perfect Game', description: 'Win a game without anyone guessing your word', icon: '👑' },
+  LOYAL_PLAYER: { id: 'loyal_player', title: 'Loyal Player', description: 'Play 7 days in a row', icon: '📅' },
+};
+
+// Check and unlock achievements based on stats
+export async function checkAchievements(userId: string): Promise<string[]> {
+  const stats = await getPlayerStats(userId);
+  const unlocked: string[] = [];
+  
+  // First win
+  if (stats.gamesWon >= 1) {
+    const wasUnlocked = await unlockAchievement(userId, ACHIEVEMENTS.FIRST_WIN.id, ACHIEVEMENTS.FIRST_WIN.title, ACHIEVEMENTS.FIRST_WIN.description, ACHIEVEMENTS.FIRST_WIN.icon);
+    if (wasUnlocked) unlocked.push(ACHIEVEMENTS.FIRST_WIN.title);
+  }
+  
+  // Winning streak 3
+  if (stats.currentStreak >= 3) {
+    const wasUnlocked = await unlockAchievement(userId, ACHIEVEMENTS.WINNING_STREAK_3.id, ACHIEVEMENTS.WINNING_STREAK_3.title, ACHIEVEMENTS.WINNING_STREAK_3.description, ACHIEVEMENTS.WINNING_STREAK_3.icon);
+    if (wasUnlocked) unlocked.push(ACHIEVEMENTS.WINNING_STREAK_3.title);
+  }
+  
+  // Winning streak 5
+  if (stats.currentStreak >= 5) {
+    const wasUnlocked = await unlockAchievement(userId, ACHIEVEMENTS.WINNING_STREAK_5.id, ACHIEVEMENTS.WINNING_STREAK_5.title, ACHIEVEMENTS.WINNING_STREAK_5.description, ACHIEVEMENTS.WINNING_STREAK_5.icon);
+    if (wasUnlocked) unlocked.push(ACHIEVEMENTS.WINNING_STREAK_5.title);
+  }
+  
+  // Master Guesser
+  if (stats.wordsGuessed >= 100) {
+    const wasUnlocked = await unlockAchievement(userId, ACHIEVEMENTS.MASTER_GUESSER.id, ACHIEVEMENTS.MASTER_GUESSER.title, ACHIEVEMENTS.MASTER_GUESSER.description, ACHIEVEMENTS.MASTER_GUESSER.icon);
+    if (wasUnlocked) unlocked.push(ACHIEVEMENTS.MASTER_GUESSER.title);
+  }
+  
+  // Master Artist
+  if (stats.wordsDrawn >= 50) {
+    const wasUnlocked = await unlockAchievement(userId, ACHIEVEMENTS.MASTER_ARTIST.id, ACHIEVEMENTS.MASTER_ARTIST.title, ACHIEVEMENTS.MASTER_ARTIST.description, ACHIEVEMENTS.MASTER_ARTIST.icon);
+    if (wasUnlocked) unlocked.push(ACHIEVEMENTS.MASTER_ARTIST.title);
+  }
+  
+  // Social Butterfly
+  if (stats.gamesPlayed >= 50) {
+    const wasUnlocked = await unlockAchievement(userId, ACHIEVEMENTS.SOCIAL_BUTTERFLY.id, ACHIEVEMENTS.SOCIAL_BUTTERFLY.title, ACHIEVEMENTS.SOCIAL_BUTTERFLY.description, ACHIEVEMENTS.SOCIAL_BUTTERFLY.icon);
+    if (wasUnlocked) unlocked.push(ACHIEVEMENTS.SOCIAL_BUTTERFLY.title);
+  }
+  
+  return unlocked;
 }

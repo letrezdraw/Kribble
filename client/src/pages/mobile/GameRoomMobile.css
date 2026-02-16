@@ -447,6 +447,24 @@
   gap: 8px;
 }
 
+/* Drawer Indicator */
+.drawer-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 16px;
+  background: rgba(139, 92, 246, 0.15);
+  border-top: 1px solid rgba(139, 92, 246, 0.3);
+  font-size: 13px;
+  color: var(--primary-300);
+  font-weight: 500;
+}
+
+.drawer-indicator svg {
+  color: var(--primary-400);
+}
+
 /* Word Bar */
 .word-bar {
   display: flex;
@@ -462,6 +480,7 @@
   background: rgba(245, 158, 11, 0.1);
   border-color: rgba(245, 158, 11, 0.2);
 }
+
 
 .word-text {
   font-size: 14px;
@@ -492,6 +511,8 @@
   overflow: hidden;
   background: #1a1a2e;
   touch-action: none;
+  /* Ensure canvas doesn't get pushed by bottom elements */
+  min-height: 0;
 }
 
 .canvas-wrapper-mobile {
@@ -501,7 +522,10 @@
   background: #1a1a2e;
   margin: 4px;
   border-radius: 12px;
+  /* Prevent canvas from shrinking too much */
+  min-height: 200px;
 }
+
 
 /* Center the canvas viewport */
 .canvas-wrapper-mobile .canvas-viewport {
@@ -565,8 +589,11 @@
   gap: 6px;
   z-index: 5;
   /* Prevent toolbar from going below viewport */
-  max-height: 35vh;
+  max-height: 30vh;
+  /* Ensure toolbar doesn't overlap with canvas gestures */
+  pointer-events: auto;
 }
+
 
 .toolbar-section {
   display: flex;
@@ -724,7 +751,10 @@
   color: white;
   box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
   z-index: 5;
+  /* Ensure button is above canvas but doesn't block interactions */
+  pointer-events: auto;
 }
+
 
 /* ============================================
    OVERLAY PANELS
@@ -1168,7 +1198,34 @@
   .room-code-box .code {
     font-size: 24px;
   }
+  
+  /* Compact header for small screens */
+  .header-top {
+    height: 48px;
+    padding: 8px;
+  }
+  
+  .word-bar {
+    padding: 4px 12px;
+    min-height: 32px;
+  }
 }
+
+/* Ensure canvas is visible when keyboard is open */
+@media (max-height: 500px) {
+  .canvas-wrapper-mobile {
+    min-height: 150px;
+  }
+  
+  .floating-toolbar {
+    max-height: 25vh;
+  }
+  
+  .bottom-sheet {
+    max-height: 50dvh;
+  }
+}
+
 
 /* Landscape mode */
 @media (max-height: 500px) and (orientation: landscape) {

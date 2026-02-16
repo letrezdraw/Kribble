@@ -11,12 +11,22 @@ build
 /build
 */build
 
-# Environment files
+# Environment files - SECRET (never commit)
 .env
 .env.local
 .env.*.local
 server/.env
 client/.env
+
+# Environment templates and examples - SAFE to commit
+!.env.example
+!.env.development
+!.env.production
+server/.env.example
+server/.env.development
+client/.env.development
+client/.env.production
+
 
 # Database files
 *.db

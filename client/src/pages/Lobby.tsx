@@ -210,6 +210,7 @@ export default function Lobby() {
             <div className="quick-actions">
 
               <motion.button 
+                key="quick-play"
                 className="quick-action-btn primary"
                 onClick={handleQuickMatch}
                 whileTap={{ scale: 0.98 }}
@@ -219,6 +220,7 @@ export default function Lobby() {
               </motion.button>
               
               <motion.button 
+                key="leaderboard"
                 className="quick-action-btn"
                 onClick={() => setShowLeaderboard(true)}
                 whileTap={{ scale: 0.98 }}
@@ -228,6 +230,7 @@ export default function Lobby() {
               </motion.button>
               
               <motion.button 
+                key="profile"
                 className="quick-action-btn"
                 onClick={() => navigate('/profile')}
                 whileTap={{ scale: 0.98 }}
@@ -237,6 +240,7 @@ export default function Lobby() {
               </motion.button>
               
               <motion.button 
+                key="settings"
                 className="quick-action-btn"
                 onClick={() => navigate('/settings')}
                 whileTap={{ scale: 0.98 }}
@@ -244,6 +248,7 @@ export default function Lobby() {
                 <Settings size={20} />
                 <span>Settings</span>
               </motion.button>
+
             </div>
           </div>
 

@@ -419,6 +419,16 @@ export default function GameRoomMobile() {
           </div>
         </div>
 
+        {/* Drawer Indicator */}
+        {gameState.phase === 'drawing' && (
+          <div className="drawer-indicator">
+            <Pencil size={14} />
+            <span>
+              {room?.players?.find(p => p.isDrawer)?.username || 'Someone'} is drawing
+            </span>
+          </div>
+        )}
+
         {/* Word Bar */}
         {gameState.phase === 'drawing' && (
           <div className="word-bar">
@@ -435,6 +445,13 @@ export default function GameRoomMobile() {
             <span>Choose a word to draw...</span>
           </div>
         )}
+
+        {gameState.phase === 'selection' && !isDrawer && (
+          <div className="word-bar selection">
+            <span>Waiting for {room?.players?.find(p => p.isDrawer)?.username || 'drawer'} to choose...</span>
+          </div>
+        )}
+
       </header>
 
       {/* Canvas Area */}

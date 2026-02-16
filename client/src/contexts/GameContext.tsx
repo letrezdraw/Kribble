@@ -369,34 +369,54 @@ export function GameProvider({ children }: { children: ReactNode }) {
     });
 
 
-    socket.on('game:guess-correct', (data: { playerId: string; username: string; word: string; points: number }) => {
+    socket.on('game:guess-correct', (data: { playerId: string; username: string; word: string; points: number; scores?: { playerId: string; score: number }[] }) => {
       console.log('[GameContext] game:guess-correct received:', data);
       
-      // Update scores in gameState
-      setGameState(prev => {
-        const existingScore = prev.scores.find(s => s.playerId === data.playerId);
-        const newScores = existingScore 
-          ? prev.scores.map(s => s.playerId === data.playerId ? { ...s, score: s.score + data.points } : s)
-          : [...prev.scores, { playerId: data.playerId, score: data.points }];
-        return {
+      // If server sends full scores array, use it directly
+      if (data.scores && data.scores.length > 0) {
+        setGameState(prev => ({
           ...prev,
-          scores: newScores
-        };
-      });
-      
-      // Also update room.players so the player list shows updated scores
-      setRoom(prev => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          players: prev.players.map(p => 
-            p.id === data.playerId 
-              ? { ...p, score: p.score + data.points }
-              : p
-          )
-        };
-      });
+          scores: data.scores!
+        }));
+        
+        // Update room.players with the new scores
+        setRoom(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            players: prev.players.map(p => {
+              const scoreData = data.scores!.find(s => s.playerId === p.id);
+              return scoreData ? { ...p, score: scoreData.score } : p;
+            })
+          };
+        });
+      } else {
+        // Fallback to old behavior if scores array not provided
+        setGameState(prev => {
+          const existingScore = prev.scores.find(s => s.playerId === data.playerId);
+          const newScores = existingScore 
+            ? prev.scores.map(s => s.playerId === data.playerId ? { ...s, score: s.score + data.points } : s)
+            : [...prev.scores, { playerId: data.playerId, score: data.points }];
+          return {
+            ...prev,
+            scores: newScores
+          };
+        });
+        
+        setRoom(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            players: prev.players.map(p => 
+              p.id === data.playerId 
+                ? { ...p, score: p.score + data.points }
+                : p
+            )
+          };
+        });
+      }
     });
+
 
 
     socket.on('game:round-end', (data: { word: string; scores: { playerId: string; score: number }[]; roundPoints?: any[] }) => {

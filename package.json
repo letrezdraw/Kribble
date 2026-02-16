@@ -16,8 +16,13 @@
     "build:server": "cd server && npm run build",
     "build:client": "cd client && npm run build",
     "start": "cd server && npm start",
-    "install:all": "npm install"
+    "install:all": "npm install",
+    "tunnel": "scripts\\mobile-tunnel.bat",
+    "tunnel:ps": "powershell -ExecutionPolicy Bypass -File scripts\\mobile-tunnel.ps1",
+    "tunnel:ngrok": "ngrok http 3001",
+    "ip": "powershell -Command \"(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } | Select-Object -First 1).IPAddress\""
   },
+
   "devDependencies": {
     "concurrently": "^8.2.2",
     "typescript": "^5.3.3"

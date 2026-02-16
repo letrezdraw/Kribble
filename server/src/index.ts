@@ -1,4 +1,9 @@
-import express, { Request, Response } from 'express';
+import dotenv from 'dotenv';
+
+// Load environment variables from .env file
+dotenv.config();
+
+import express, { Request, Response, NextFunction } from 'express';
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 
@@ -8,6 +13,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 
+
 // Import routes and handlers
 import { authRoutes, cleanupExpiredGuests } from './routes/auth.js';
 import { roomRoutes } from './routes/rooms.js';
@@ -16,12 +22,29 @@ import { wordRoutes } from './routes/words.js';
 import { setupSocketHandlers } from './socket/handlers.js';
 import { initDatabase } from './db/index.js';
 import { startCleanupScheduler } from './data/rooms.js';
+import { logger } from './utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const httpServer = createServer(app);
+
+// Request logging middleware
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const start = Date.now();
+  const userId = (req as any).user?.id || 'anonymous';
+  
+  logger.apiRequest(req.method, req.path, userId, req.body, req.ip);
+  
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    logger.apiResponse(req.method, req.path, res.statusCode, duration, userId);
+  });
+  
+  next();
+});
+
 
 // Environment-based CORS configuration
 // In development: allow common Vite ports (5173, 3000, 4173) and any localhost
@@ -76,15 +99,22 @@ app.set('io', io);
 // Track connected users
 const connectedSockets = new Set<string>();
 
+// Log server startup
+logger.info('SERVER', 'Server initialization started', { port: process.env.PORT || 3001 });
+
+
 io.on('connection', (socket: Socket) => {
   connectedSockets.add(socket.id);
+  logger.socketEvent('connect', socket.id, { total: connectedSockets.size });
   console.log(`[Online] User connected. Total: ${connectedSockets.size}`);
   
-  socket.on('disconnect', () => {
+  socket.on('disconnect', (reason) => {
     connectedSockets.delete(socket.id);
+    logger.socketEvent('disconnect', socket.id, { reason, total: connectedSockets.size });
     console.log(`[Online] User disconnected. Total: ${connectedSockets.size}`);
   });
 });
+
 
 
 // API endpoint for real online count
@@ -116,12 +146,19 @@ async function startServer() {
     // Start server
     const PORT = process.env.PORT || 3001;
     httpServer.listen(PORT, () => {
+      logger.info('SERVER', 'Server started successfully', { 
+        port: PORT, 
+        environment: isProduction ? 'production' : 'development',
+        corsOrigins 
+      });
       console.log(`Server running on port ${PORT}`);
       console.log(`Environment: ${isProduction ? 'production' : 'development'}`);
       console.log(`CORS origins: ${JSON.stringify(corsOrigins)}`);
       console.log(`Room cleanup scheduler started (every 5 minutes)`);
       console.log(`Guest user cleanup scheduler started (every hour)`);
+      console.log(`Log file: ${process.cwd()}/logs/development.log`);
     });
+
 
     // Graceful shutdown
     process.on('SIGTERM', () => {
@@ -144,9 +181,11 @@ async function startServer() {
       });
     });
   } catch (error) {
+    logger.error('SERVER', 'Failed to start server', error as Error);
     console.error('[Server] Failed to start:', error);
     process.exit(1);
   }
+
 }
 
 // Start the server

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, User, Bell, Shield, Palette, Volume2, Moon, Globe, Smartphone, ChevronRight } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import api from '../services/api';
 import Button from '../components/Button';
 import './Settings.css';
 
@@ -48,6 +49,10 @@ export default function Settings() {
   const { user } = useAuth();
   
   const [activeTab, setActiveTab] = useState<'account' | 'preferences' | 'privacy' | 'notifications'>('account');
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   
   const [settings, setSettings] = useState(() => {
     const loaded = loadSettings();
@@ -58,17 +63,72 @@ export default function Settings() {
     };
   });
 
+  // Load settings from API on mount
+  useEffect(() => {
+    const fetchSettings = async () => {
+      if (!user?.id) return;
+      
+      setLoading(true);
+      try {
+        const response = await api.get(`/users/${user.id}/settings`);
+        if (response.data.settings) {
+          setSettings((prev: typeof DEFAULT_SETTINGS) => ({
+            ...prev,
+            ...response.data.settings,
+            username: user?.username || prev.username,
+            email: user?.email || prev.email,
+          }));
+        }
+      } catch (err: any) {
+        console.error('Failed to load settings from API:', err);
+        // Fall back to localStorage
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSettings();
+  }, [user?.id]);
+
   // Persist settings to localStorage whenever they change
   useEffect(() => {
     saveSettingsToStorage(settings);
   }, [settings]);
 
-  const handleSave = () => {
-    saveSettingsToStorage(settings);
-    // Show success feedback
-    alert('Settings saved successfully!');
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    setSuccess('');
+    
+    try {
+      // Save to localStorage first
+      saveSettingsToStorage(settings);
+      
+      // Save to API if user is logged in
+      if (user?.id) {
+        await api.put(`/users/${user.id}/settings`, {
+          settings: {
+            theme: settings.theme,
+            sound: settings.sound,
+            music: settings.music,
+            notifications: settings.notifications,
+            emailNotifications: settings.emailNotifications,
+            profilePublic: settings.profilePublic,
+            chatEnabled: settings.chatEnabled,
+            language: settings.language,
+            haptic: settings.haptic,
+          }
+        });
+      }
+      
+      setSuccess('Settings saved successfully!');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
   };
-
 
   const tabs = [
     { id: 'account', label: 'Account', icon: User },
@@ -79,7 +139,6 @@ export default function Settings() {
 
   return (
     <div className="settings-page">
-
       {/* Header */}
       <header className="settings-header">
         <Button variant="ghost" size="sm" onClick={() => navigate('/profile')}>
@@ -148,7 +207,10 @@ export default function Settings() {
                 />
               </div>
 
-              <Button variant="primary" onClick={handleSave} className="save-btn">
+              {error && <div className="error-message" style={{ marginBottom: '16px' }}>{error}</div>}
+              {success && <div className="success-message" style={{ marginBottom: '16px', color: '#4ade80' }}>{success}</div>}
+              
+              <Button variant="primary" onClick={handleSave} className="save-btn" loading={saving} disabled={saving}>
                 Save Changes
               </Button>
             </div>
@@ -229,7 +291,10 @@ export default function Settings() {
                 </div>
               </div>
 
-              <Button variant="primary" onClick={handleSave} className="save-btn">
+              {error && <div className="error-message" style={{ marginBottom: '16px' }}>{error}</div>}
+              {success && <div className="success-message" style={{ marginBottom: '16px', color: '#4ade80' }}>{success}</div>}
+              
+              <Button variant="primary" onClick={handleSave} className="save-btn" loading={saving} disabled={saving}>
                 Save Changes
               </Button>
             </div>
@@ -289,7 +354,10 @@ export default function Settings() {
                 </Button>
               </div>
 
-              <Button variant="primary" onClick={handleSave} className="save-btn">
+              {error && <div className="error-message" style={{ marginBottom: '16px' }}>{error}</div>}
+              {success && <div className="success-message" style={{ marginBottom: '16px', color: '#4ade80' }}>{success}</div>}
+              
+              <Button variant="primary" onClick={handleSave} className="save-btn" loading={saving} disabled={saving}>
                 Save Changes
               </Button>
             </div>
@@ -349,7 +417,10 @@ export default function Settings() {
                 </button>
               </div>
 
-              <Button variant="primary" onClick={handleSave} className="save-btn">
+              {error && <div className="error-message" style={{ marginBottom: '16px' }}>{error}</div>}
+              {success && <div className="success-message" style={{ marginBottom: '16px', color: '#4ade80' }}>{success}</div>}
+              
+              <Button variant="primary" onClick={handleSave} className="save-btn" loading={saving} disabled={saving}>
                 Save Changes
               </Button>
             </div>

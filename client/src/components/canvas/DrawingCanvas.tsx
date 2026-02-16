@@ -182,6 +182,69 @@ export default function DrawingCanvas({
   }, []);
 
 
+  // Process pointer event - NO INTERPOLATION (handled by distance-based stamping)
+  const processPointerEvent = (e: PointerEvent) => {
+    if (!isDrawing) return;
+    
+    // @ts-ignore
+    const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    
+    for (const ev of events) {
+      // Use transformRef to get latest transform state
+      const pos = getPosFromEvent(ev, containerRef, transformRef.current);
+
+      
+      const isPen = ev.pointerType === 'pen';
+      let rawPressure: number;
+      
+      if (isPen) {
+        if (ev.pressure > 0) {
+          rawPressure = ev.pressure;
+        } else {
+          rawPressure = smoothedPressureRef.current > 0.1 
+            ? smoothedPressureRef.current 
+            : 0.5;
+        }
+      } else {
+        rawPressure = 1;
+      }
+      
+      const prevSmoothed = smoothedPressureRef.current;
+      const newSmoothed = prevSmoothed + (rawPressure - prevSmoothed) * PRESSURE_SMOOTHING;
+      smoothedPressureRef.current = newSmoothed;
+      currentPressureRef.current = newSmoothed;
+      
+      const pressurePoint: PressurePoint = {
+        x: pos.x,
+        y: pos.y,
+        pressure: newSmoothed,
+        tiltX: (ev as any).tiltX,
+        tiltY: (ev as any).tiltY,
+      };
+      
+      // NO INTERPOLATION - distance-based stamping handles gaps
+      currentStrokeRef.current.push(pressurePoint);
+    }
+    
+    if (activeTool === 'brush' || activeTool === 'eraser') {
+      scheduleRender();
+    } else if (['rect', 'circle', 'line'].includes(activeTool)) {
+      if (liveCtxRef.current) {
+        clearLiveCanvas();
+        const endPos = currentStrokeRef.current[currentStrokeRef.current.length - 1];
+        drawPreviewShape(
+          liveCtxRef.current,
+          shapeStartRef.current!,
+          endPos,
+          activeTool as 'rect' | 'circle' | 'line',
+          brushColor,
+          brushSize,
+          brushOpacity
+        );
+      }
+    }
+  };
+
   // Separate effect for pointerrawupdate listener
   useEffect(() => {
     if (!liveCanvasRef.current) return;
@@ -201,6 +264,7 @@ export default function DrawingCanvas({
       liveCanvas.removeEventListener('pointerrawupdate', handleRawUpdate);
     };
   }, [isDrawing]);
+
 
   // Handle resize - update display size for coordinate calculations
   useEffect(() => {
@@ -526,7 +590,94 @@ export default function DrawingCanvas({
     });
   }, [brushSettings.showLivePreview, renderStrokeImmediate]);
 
+  // Throttled live stroke sync to server
+  const lastSyncTimeRef = useRef<number>(0);
+  const syncThrottleMs = 50; // Sync every 50ms max
+  
+  const syncStrokeLive = useCallback(() => {
+    if (!socket || !isDrawing) return;
+    
+    const now = Date.now();
+    if (now - lastSyncTimeRef.current < syncThrottleMs) return;
+    lastSyncTimeRef.current = now;
+    
+    // Send current stroke points to server for live preview
+    if (currentStrokeRef.current.length > 1) {
+      const liveStroke: Stroke = {
+        id: 'live-' + Date.now(),
+        tool: activeTool as ToolType,
+        points: currentStrokeRef.current.slice(-10).map(p => ({ x: p.x, y: p.y, pressure: p.pressure })), // Send last 10 points
+        color: brushColor,
+        size: brushSize,
+        opacity: brushOpacity,
+        isLive: true, // Flag as live stroke
+      };
+      socket.emit('draw:stroke:live', { stroke: liveStroke });
+    }
+  }, [socket, isDrawing, activeTool, brushColor, brushSize, brushOpacity]);
+
+  // Apply tapering at the end of stroke - gradually reduce pressure to 0
+  const applyTapering = (points: PressurePoint[]): PressurePoint[] => {
+    if (points.length < 3) return points;
+    
+    const TAPER_LENGTH = 15; // Number of points to taper
+    const startTaperIdx = Math.max(0, points.length - TAPER_LENGTH);
+    
+    return points.map((p, i) => {
+      if (i < startTaperIdx) {
+        return p; // No change for points before taper zone
+      }
+      
+      // Calculate taper factor: 1.0 at start of taper zone, 0.0 at end
+      const taperProgress = (i - startTaperIdx) / TAPER_LENGTH;
+      const taperFactor = 1 - Math.pow(taperProgress, 0.5); // Ease out curve
+      
+      return {
+        ...p,
+        pressure: p.pressure * taperFactor,
+      };
+    });
+  };
+
+  // Helper to reduce point count for storage
+  const samplePointsForStorage = (points: PressurePoint[]): Point[] => {
+    if (points.length <= 30) {
+      return points.map(p => ({ x: p.x, y: p.y, pressure: p.pressure }));
+    }
+    
+    const sampled: Point[] = [points[0]];
+    let lastSampledIdx = 0;
+    
+    for (let i = 1; i < points.length - 1; i++) {
+      const p = points[i];
+      const lastSampled = points[lastSampledIdx];
+      const dx = p.x - lastSampled.x;
+      const dy = p.y - lastSampled.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      const pressureDiff = Math.abs(p.pressure - lastSampled.pressure);
+      const hasPressureChange = pressureDiff > 0.15;
+      
+      const avgPressure = (p.pressure + lastSampled.pressure) / 2;
+      const adaptiveSpacing = Math.max(1.5, brushSize * 0.08 * (0.5 + avgPressure));
+      
+      if (distance >= adaptiveSpacing || hasPressureChange) {
+        sampled.push({ x: p.x, y: p.y, pressure: p.pressure });
+        lastSampledIdx = i;
+      }
+    }
+    
+    const last = points[points.length - 1];
+    const lastSampled = points[lastSampledIdx];
+    if (last.x !== lastSampled.x || last.y !== lastSampled.y) {
+      sampled.push({ x: last.x, y: last.y, pressure: last.pressure });
+    }
+    
+    return sampled;
+  };
+
   // Window mouse events for drawing outside canvas
+
   useEffect(() => {
     if (!isDrawing || !isDrawer) return; // Block non-drawers from drawing
 
@@ -555,7 +706,11 @@ export default function DrawingCanvas({
       } else {
         scheduleRender();
       }
+      
+      // Sync live stroke to other players
+      syncStrokeLive();
     };
+
 
     const handleMouseUp = () => {
       // End drawing - save stroke before clearing
@@ -623,7 +778,8 @@ export default function DrawingCanvas({
       window.removeEventListener('mouseup', handleMouseUp);
     };
 
-  }, [isDrawing, isDrawer, activeTool, brushSize, brushColor, brushOpacity, transform, scheduleRender, brushSettings.showLivePreview, renderStrokeImmediate]);
+  }, [isDrawing, isDrawer, activeTool, brushSize, brushColor, brushOpacity, transform, scheduleRender, brushSettings.showLivePreview, renderStrokeImmediate, syncStrokeLive]);
+
 
 
   // Touch gesture state for mobile
@@ -883,6 +1039,8 @@ export default function DrawingCanvas({
       
       if (activeTool === 'brush' || activeTool === 'eraser') {
         scheduleRender();
+        // Sync live stroke during touch drawing
+        syncStrokeLive();
       } else if (['rect', 'circle', 'line'].includes(activeTool)) {
         clearLiveCanvas();
         const endPos = currentStrokeRef.current[currentStrokeRef.current.length - 1];
@@ -895,45 +1053,6 @@ export default function DrawingCanvas({
           brushSize,
           brushOpacity
         );
-      }
-    } else if (touches.length === 2 && touchStartDistanceRef.current && touchStartTransformRef.current) {
-      // Two finger pinch zoom and pan
-      const currentDistance = getTouchDistance(touches);
-      const scaleFactor = currentDistance / touchStartDistanceRef.current;
-      
-      // Calculate current center point
-      const currentCenterX = (touches[0].clientX + touches[1].clientX) / 2;
-      const currentCenterY = (touches[0].clientY + touches[1].clientY) / 2;
-      
-      const startTransform = touchStartTransformRef.current;
-      const newScale = Math.max(0.25, Math.min(4, startTransform.scale * scaleFactor));
-      
-      // Calculate pan delta
-      const viewportRect = containerRef.current?.getBoundingClientRect();
-      if (viewportRect && touchStartCenterRef.current) {
-        const viewportCenterX = viewportRect.left + viewportRect.width / 2;
-        const viewportCenterY = viewportRect.top + viewportRect.height / 2;
-        
-        // Calculate how much the center has moved (pan)
-        const panDeltaX = currentCenterX - touchStartCenterRef.current.x;
-        const panDeltaY = currentCenterY - touchStartCenterRef.current.y;
-        
-        // Calculate zoom adjustment to keep zoom centered on the pinch point
-        const scaleRatio = newScale / startTransform.scale;
-        const zoomAdjustX = (touchStartCenterRef.current.x - viewportCenterX - startTransform.translateX) * (scaleRatio - 1);
-        const zoomAdjustY = (touchStartCenterRef.current.y - viewportCenterY - startTransform.translateY) * (scaleRatio - 1);
-        
-        setTransform({
-          ...startTransform,
-          scale: newScale,
-          translateX: startTransform.translateX + panDeltaX + zoomAdjustX,
-          translateY: startTransform.translateY + panDeltaY + zoomAdjustY,
-        });
-      } else {
-        setTransform({
-          ...startTransform,
-          scale: newScale,
-        });
       }
     }
   };
@@ -1051,69 +1170,6 @@ export default function DrawingCanvas({
   };
 
 
-  // Process pointer event - NO INTERPOLATION (handled by distance-based stamping)
-  const processPointerEvent = (e: PointerEvent) => {
-    if (!isDrawing) return;
-    
-    // @ts-ignore
-    const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-    
-    for (const ev of events) {
-      // Use transformRef to get latest transform state
-      const pos = getPosFromEvent(ev, containerRef, transformRef.current);
-
-      
-      const isPen = ev.pointerType === 'pen';
-      let rawPressure: number;
-      
-      if (isPen) {
-        if (ev.pressure > 0) {
-          rawPressure = ev.pressure;
-        } else {
-          rawPressure = smoothedPressureRef.current > 0.1 
-            ? smoothedPressureRef.current 
-            : 0.5;
-        }
-      } else {
-        rawPressure = 1;
-      }
-      
-      const prevSmoothed = smoothedPressureRef.current;
-      const newSmoothed = prevSmoothed + (rawPressure - prevSmoothed) * PRESSURE_SMOOTHING;
-      smoothedPressureRef.current = newSmoothed;
-      currentPressureRef.current = newSmoothed;
-      
-      const pressurePoint: PressurePoint = {
-        x: pos.x,
-        y: pos.y,
-        pressure: newSmoothed,
-        tiltX: (ev as any).tiltX,
-        tiltY: (ev as any).tiltY,
-      };
-      
-      // NO INTERPOLATION - distance-based stamping handles gaps
-      currentStrokeRef.current.push(pressurePoint);
-    }
-    
-    if (activeTool === 'brush' || activeTool === 'eraser') {
-      scheduleRender();
-    } else if (['rect', 'circle', 'line'].includes(activeTool)) {
-      if (liveCtxRef.current) {
-        clearLiveCanvas();
-        const endPos = currentStrokeRef.current[currentStrokeRef.current.length - 1];
-        drawPreviewShape(
-          liveCtxRef.current,
-          shapeStartRef.current!,
-          endPos,
-          activeTool as 'rect' | 'circle' | 'line',
-          brushColor,
-          brushSize,
-          brushOpacity
-        );
-      }
-    }
-  };
-
   // Pointer event handler for pen tablet support
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isDrawer || !staticCtxRef.current || !liveCtxRef.current) {
@@ -1127,8 +1183,6 @@ export default function DrawingCanvas({
       return;
     }
 
-
-    
     // RIGHT CLICK - Show context menu only, don't draw
     if (e.button === 2) {
       e.preventDefault();
@@ -1142,7 +1196,6 @@ export default function DrawingCanvas({
     }
     
     const isPen = e.pointerType === 'pen';
-
     isPenActiveRef.current = isPen;
     
     const rawPressure = isPen && e.pressure > 0 
@@ -1188,11 +1241,9 @@ export default function DrawingCanvas({
       return;
     }
 
-
     e.preventDefault();
     // Use transformRef to get latest transform state
     const pos = getPos(e as unknown as React.MouseEvent, containerRef, transformRef.current);
-
     const liveCtx = liveCtxRef.current;
 
     if (activeTool === 'text') {
@@ -1201,6 +1252,8 @@ export default function DrawingCanvas({
     }
 
     if (activeTool === 'fill') {
+      // Capture canvas state BEFORE applying fill for undo support
+      const canvasState = staticCtxRef.current.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE).data;
       floodFill(staticCtxRef.current, pos.x, pos.y, brushColor, brushOpacity);
       const stroke: Stroke = {
         id: Date.now().toString(),
@@ -1209,12 +1262,14 @@ export default function DrawingCanvas({
         color: brushColor,
         size: brushSize,
         opacity: brushOpacity,
+        canvasState: new Uint8ClampedArray(canvasState), // Store copy of canvas state
       };
       strokesRef.current.push(stroke);
       redoStackRef.current = [];
       socket?.emit('draw:stroke', { stroke });
       return;
     }
+
 
     setIsDrawing(true);
     
@@ -1252,7 +1307,6 @@ export default function DrawingCanvas({
       return;
     }
 
-
     // Handle zooming
     if (isZooming && zoomStartRef.current) {
       e.preventDefault();
@@ -1288,7 +1342,6 @@ export default function DrawingCanvas({
     for (const ev of events) {
       // Use transformRef to get latest transform state
       const pos = getPosFromEvent(ev, containerRef, transformRef.current);
-
       
       const isPen = ev.pointerType === 'pen';
       let rawPressure: number;
@@ -1324,6 +1377,8 @@ export default function DrawingCanvas({
     
     if (activeTool === 'brush' || activeTool === 'eraser') {
       scheduleRender();
+      // Sync live stroke during pointer drawing
+      syncStrokeLive();
     } else if (['rect', 'circle', 'line'].includes(activeTool)) {
       clearLiveCanvas();
       const endPos = currentStrokeRef.current[currentStrokeRef.current.length - 1];
@@ -1347,7 +1402,6 @@ export default function DrawingCanvas({
 
     // End panning
     if (isPanning) {
-
       setIsPanning(false);
       panStartRef.current = null;
       return;
@@ -1417,66 +1471,7 @@ export default function DrawingCanvas({
     smoothedPressureRef.current = 1;
   };
 
-  // Apply tapering at the end of stroke - gradually reduce pressure to 0
-  const applyTapering = (points: PressurePoint[]): PressurePoint[] => {
-    if (points.length < 3) return points;
-    
-    const TAPER_LENGTH = 15; // Number of points to taper
-    const startTaperIdx = Math.max(0, points.length - TAPER_LENGTH);
-    
-    return points.map((p, i) => {
-      if (i < startTaperIdx) {
-        return p; // No change for points before taper zone
-      }
-      
-      // Calculate taper factor: 1.0 at start of taper zone, 0.0 at end
-      const taperProgress = (i - startTaperIdx) / TAPER_LENGTH;
-      const taperFactor = 1 - Math.pow(taperProgress, 0.5); // Ease out curve
-      
-      return {
-        ...p,
-        pressure: p.pressure * taperFactor,
-      };
-    });
-  };
-
-  // Helper to reduce point count for storage
-  const samplePointsForStorage = (points: PressurePoint[]): Point[] => {
-    if (points.length <= 30) {
-      return points.map(p => ({ x: p.x, y: p.y, pressure: p.pressure }));
-    }
-    
-    const sampled: Point[] = [points[0]];
-    let lastSampledIdx = 0;
-    
-    for (let i = 1; i < points.length - 1; i++) {
-      const p = points[i];
-      const lastSampled = points[lastSampledIdx];
-      const dx = p.x - lastSampled.x;
-      const dy = p.y - lastSampled.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      
-      const pressureDiff = Math.abs(p.pressure - lastSampled.pressure);
-      const hasPressureChange = pressureDiff > 0.15;
-      
-      const avgPressure = (p.pressure + lastSampled.pressure) / 2;
-      const adaptiveSpacing = Math.max(1.5, brushSize * 0.08 * (0.5 + avgPressure));
-      
-      if (distance >= adaptiveSpacing || hasPressureChange) {
-        sampled.push({ x: p.x, y: p.y, pressure: p.pressure });
-        lastSampledIdx = i;
-      }
-    }
-    
-    const last = points[points.length - 1];
-    const lastSampled = points[lastSampledIdx];
-    if (last.x !== lastSampled.x || last.y !== lastSampled.y) {
-      sampled.push({ x: last.x, y: last.y, pressure: last.pressure });
-    }
-    
-    return sampled;
-  };
-
+  // Undo/Redo/Clear functions
   const undoInternal = useCallback(() => {
     if (strokesRef.current.length === 0) return;
     const removed = strokesRef.current.pop()!;
@@ -1611,7 +1606,6 @@ export default function DrawingCanvas({
             transform: `translate(${transform.translateX}px, ${transform.translateY}px) rotate(${transform.rotation}deg) scale(${transform.scale})`,
           }}
         >
-
           <canvas
             ref={staticCanvasRef}
             className="canvas-static"
@@ -1623,7 +1617,6 @@ export default function DrawingCanvas({
             className={clsx('canvas-live', { 
               'view-only': !isDrawer 
             })}
-
             width={CANVAS_SIZE}
             height={CANVAS_SIZE}
             onPointerDown={handlePointerDown}
@@ -1635,11 +1628,8 @@ export default function DrawingCanvas({
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
           />
-
         </div>
       </div>
-
-
 
       <BrushSettingsMenu
         settings={brushSettings}

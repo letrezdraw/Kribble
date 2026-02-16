@@ -31,7 +31,11 @@ export interface Stroke {
   endPoint?: Point;
   text?: string;
   pressureData?: number[]; // Array of pressure values for each point
+  isLive?: boolean; // Flag for live stroke preview
+  canvasState?: Uint8ClampedArray; // Canvas ImageData for fill tool undo support
 }
+
+
 
 
 export interface CanvasState {

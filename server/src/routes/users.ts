@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
-import { db, getPlayerStats, getMatchHistory, getLeaderboard, getDailyChallenges, updateChallengeProgress } from '../db/index.js';
+import { db, getPlayerStats, getMatchHistory, getLeaderboard, getDailyChallenges, updateChallengeProgress, getAchievements, checkAchievements } from '../db/index.js';
+
 
 const router = Router();
 
@@ -112,6 +113,92 @@ router.post('/:id/challenges/:challengeId/progress', async (req: Request, res: R
     res.json({ challenges });
   } catch (error) {
     console.error('[Users] Error updating challenge:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Get user achievements
+router.get('/:id/achievements', async (req: Request, res: Response) => {
+  try {
+    const achievements = await getAchievements(req.params.id);
+    res.json({ achievements });
+  } catch (error) {
+    console.error('[Users] Error getting achievements:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Check and unlock achievements
+router.post('/:id/achievements/check', async (req: Request, res: Response) => {
+  try {
+    const unlocked = await checkAchievements(req.params.id);
+    const achievements = await getAchievements(req.params.id);
+    res.json({ achievements, newlyUnlocked: unlocked });
+  } catch (error) {
+    console.error('[Users] Error checking achievements:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
+// Get user settings
+router.get('/:id/settings', async (req: Request, res: Response) => {
+  try {
+    const user = await db.prepare('SELECT settings FROM users WHERE id = ?').get(req.params.id);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    // Parse settings from JSON or return defaults
+    let settings = {};
+    try {
+      settings = user.settings ? JSON.parse(user.settings) : {};
+    } catch (e) {
+      settings = {};
+    }
+    
+    res.json({ settings });
+  } catch (error) {
+    console.error('[Users] Error getting settings:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Update user settings
+router.put('/:id/settings', async (req: Request, res: Response) => {
+  try {
+    const { settings } = req.body;
+    
+    if (!settings || typeof settings !== 'object') {
+      return res.status(400).json({ message: 'Invalid settings data' });
+    }
+    
+    // Get existing settings and merge
+    const user = await db.prepare('SELECT settings FROM users WHERE id = ?').get(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    let existingSettings = {};
+    try {
+      existingSettings = user.settings ? JSON.parse(user.settings) : {};
+    } catch (e) {
+      existingSettings = {};
+    }
+    
+    // Merge new settings with existing
+    const mergedSettings = { ...existingSettings, ...settings };
+    
+    // Save back to database
+    await db.prepare('UPDATE users SET settings = ? WHERE id = ?').run(
+      JSON.stringify(mergedSettings),
+      req.params.id
+    );
+    
+    res.json({ settings: mergedSettings });
+  } catch (error) {
+    console.error('[Users] Error updating settings:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

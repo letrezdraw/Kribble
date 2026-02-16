@@ -92,7 +92,19 @@
 - Client listens for `CLEAR_CANVAS` and clears local canvas state
 - Canvas now broadcasts clear to ALL players including the sender (using `io.to()` instead of `socket.to()`)
 
-### 11. Rejoin Game During Active Round
+### 11. Fill Tool Undo Support
+**Status**: ✅ FIXED
+**Description**: Fill tool (paint bucket) didn't support undo/redo - filling would be lost when undoing
+**Fix Applied**:
+- Added `canvasState?: Uint8ClampedArray` property to Stroke interface for fill tool
+- Modified `floodFill()` to return void but store canvas state before applying fill
+- Modified `drawStroke()` to handle fill tool by restoring canvas state from stored ImageData
+- Modified `clearCanvas()` to NOT fill with background color (let strokes redraw naturally)
+- Updated `DrawingCanvas.tsx` to capture canvas state BEFORE applying fill and store it in stroke
+- Fill operations now properly undo by restoring the canvas to its pre-fill state
+
+### 12. Rejoin Game During Active Round
+
 **Status**: ✅ FIXED
 **Description**: Players who reload/rejoin during active game went to waiting room instead of joining game
 **Fix Applied**:
@@ -117,7 +129,23 @@
 - Added `endTurn(room: Room, io: Server)` function to handlers.ts
 - Function properly ends current turn and transitions to round end or next drawer
 
+### 14. DrawingCanvas.tsx Missing Functions
+**Status**: ✅ FIXED
+**Description**: TypeScript errors - missing functions: `undoInternal`, `redoInternal`, `applyTapering`, `samplePointsForStorage`, `handleTouchEnd`, `undo`, `redo`, `zoomIn`, `zoomOut`, `resetTransform`, `rotate`, `clearCanvas`
+**Fix Applied**:
+- Added `applyTapering()` - applies pressure tapering at end of strokes
+- Added `samplePointsForStorage()` - reduces point count for efficient storage
+- Added `handleTouchEnd()` - handles touch end events for mobile drawing
+- Added `undoInternal()` and `redoInternal()` - core undo/redo logic
+- Added `undo()`, `redo()`, `clearCanvas()` - public API functions with drawer checks
+- Added `zoomIn()`, `zoomOut()`, `resetTransform()`, `rotate()` - view transformation functions
+- Added `handlePointerDown()`, `handlePointerMove()`, `handlePointerUp()` - pointer event handlers
+- Added `handleWheel()` - mouse wheel zoom handler
+- Added `addText()` - text tool implementation
+- Fixed file truncation issue - all functions now properly defined
+
 ## Testing Checklist
+
 
 After fixes, test:
 - [x] Draw 3 strokes, undo 2, redo 1 - should show 2 strokes

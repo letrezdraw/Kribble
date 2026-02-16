@@ -30,9 +30,10 @@ export function initCanvas(canvas: HTMLCanvasElement): CanvasRenderingContext2D 
 
 export function clearCanvas(ctx: CanvasRenderingContext2D): void {
   ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-  ctx.fillStyle = BG_COLOR;
-  ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+  // Don't fill with background color - let strokes (including fills) be redrawn
+  // This preserves filled colors when undoing
 }
+
 
 export function setupBrush(ctx: CanvasRenderingContext2D, color: string, size: number, opacity: number): void {
   ctx.globalCompositeOperation = 'source-over';
@@ -388,6 +389,23 @@ export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke): void 
   
   if (stroke.tool === 'text' && stroke.text && stroke.startPoint) {
     drawText(ctx, stroke.startPoint.x, stroke.startPoint.y, stroke.text, stroke.color, stroke.size, stroke.opacity);
+    return;
+  }
+  
+  // Handle fill tool - restore the canvas state that was captured before the fill
+  if (stroke.tool === 'fill' && stroke.canvasState) {
+    // Restore the canvas to the state before this fill was applied
+    const canvas = ctx.canvas;
+    const width = canvas.width;
+    const height = canvas.height;
+    
+    // Create ImageData from the stored canvas state
+    const imageData = new ImageData(
+      new Uint8ClampedArray(stroke.canvasState),
+      width,
+      height
+    );
+    ctx.putImageData(imageData, 0, 0);
     return;
   }
   

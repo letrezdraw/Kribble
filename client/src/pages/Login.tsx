@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Mail, Lock, User, Eye, EyeOff, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { Sparkles } from 'lucide-react';
 
 import Button from '../components/Button';
 import './Login.css';
+
 
 export default function Login() {
   const navigate = useNavigate();
@@ -23,6 +24,10 @@ export default function Login() {
     email: '',
     password: '',
   });
+
+  const [showGuestModal, setShowGuestModal] = useState(false);
+  const [guestUsername, setGuestUsername] = useState('');
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,18 +52,30 @@ export default function Login() {
     setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
-  const handleGuestLogin = async () => {
+  const handleGuestLogin = () => {
+    setShowGuestModal(true);
+  };
+
+  const handleGuestSubmit = async () => {
     setError('');
     setGuestLoading(true);
     try {
-      await guest();
+      await guest(guestUsername.trim() || undefined);
       navigate('/lobby');
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to create guest account');
     } finally {
       setGuestLoading(false);
+      setShowGuestModal(false);
+      setGuestUsername('');
     }
   };
+
+  const handleCloseGuestModal = () => {
+    setShowGuestModal(false);
+    setGuestUsername('');
+  };
+
 
 
   return (
@@ -155,7 +172,6 @@ export default function Login() {
             type="button" 
             variant="secondary" 
             size="lg" 
-            loading={guestLoading}
             onClick={handleGuestLogin}
             className="guest-button"
           >
@@ -164,6 +180,77 @@ export default function Login() {
           </Button>
           
           <p className="guest-hint">⚡ Quick play - no registration needed. Data expires in 24 hours.</p>
+
+          {/* Guest Username Modal */}
+          <AnimatePresence>
+            {showGuestModal && (
+              <motion.div
+                className="modal-overlay"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={handleCloseGuestModal}
+              >
+                <motion.div
+                  className="modal-content guest-modal"
+                  initial={{ scale: 0.9, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.9, opacity: 0 }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="modal-header">
+                    <h3>Choose Your Guest Name</h3>
+                    <button className="close-btn" onClick={handleCloseGuestModal}>
+                      <X size={20} />
+                    </button>
+                  </div>
+                  
+                  <div className="modal-body">
+                    <p className="modal-description">
+                      Enter a username or leave blank for a random name.
+                    </p>
+                    
+                    <div className="form-group">
+                      <div className="input-wrapper">
+                        <User className="input-icon" size={20} />
+                        <input
+                          type="text"
+                          placeholder="GuestUsername"
+                          value={guestUsername}
+                          onChange={(e) => setGuestUsername(e.target.value)}
+                          maxLength={20}
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleGuestSubmit();
+                            }
+                          }}
+                        />
+                      </div>
+                      <span className="char-count">{guestUsername.length}/20</span>
+                    </div>
+                  </div>
+                  
+                  <div className="modal-footer">
+                    <Button 
+                      variant="ghost" 
+                      onClick={handleCloseGuestModal}
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      variant="primary" 
+                      loading={guestLoading}
+                      onClick={handleGuestSubmit}
+                    >
+                      Start Playing
+                    </Button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
         </form>
 
         <div className="login-footer">
