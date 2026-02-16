@@ -6,8 +6,8 @@ const postgresSchemaSQL = `
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   username TEXT NOT NULL UNIQUE,
-  email TEXT NOT NULL UNIQUE,
-  password TEXT NOT NULL,
+  email TEXT,
+  password TEXT,
   avatar_id TEXT DEFAULT '👤',
   level INTEGER DEFAULT 1,
   xp INTEGER DEFAULT 0,
@@ -16,7 +16,6 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-
 -- Word categories table
 CREATE TABLE IF NOT EXISTS word_categories (
   id TEXT PRIMARY KEY,
@@ -30,8 +29,13 @@ CREATE TABLE IF NOT EXISTS player_stats (
   games_played INTEGER DEFAULT 0,
   games_won INTEGER DEFAULT 0,
   total_score INTEGER DEFAULT 0,
+  words_drawn INTEGER DEFAULT 0,
   words_guessed INTEGER DEFAULT 0,
-  drawings_made INTEGER DEFAULT 0,
+  total_play_time INTEGER DEFAULT 0,
+  current_streak INTEGER DEFAULT 0,
+  best_streak INTEGER DEFAULT 0,
+  last_played_at TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
@@ -39,34 +43,43 @@ CREATE TABLE IF NOT EXISTS player_stats (
 CREATE TABLE IF NOT EXISTS match_history (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
-  result TEXT NOT NULL,
+  room_id TEXT,
+  game_mode TEXT DEFAULT 'classic',
   score INTEGER DEFAULT 0,
-  mode TEXT DEFAULT 'classic',
+  position INTEGER,
+  words_guessed INTEGER DEFAULT 0,
+  words_drawn INTEGER DEFAULT 0,
+  play_time INTEGER DEFAULT 0,
+  won BOOLEAN DEFAULT FALSE,
   played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
 -- Daily challenges table
 CREATE TABLE IF NOT EXISTS daily_challenges (
-  id TEXT PRIMARY KEY,
+  id SERIAL PRIMARY KEY,
   user_id TEXT NOT NULL,
-  challenge_type TEXT NOT NULL,
-  description TEXT NOT NULL,
+  challenge_date DATE NOT NULL,
+  challenge_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
   target INTEGER NOT NULL,
   progress INTEGER DEFAULT 0,
   completed BOOLEAN DEFAULT FALSE,
-  reward_xp INTEGER DEFAULT 0,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  reward INTEGER DEFAULT 0,
   expires_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, challenge_date, challenge_id),
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_users_guest_expires ON users(is_guest, expires_at) WHERE is_guest = TRUE;
 CREATE INDEX IF NOT EXISTS idx_match_history_user_id ON match_history(user_id);
 CREATE INDEX IF NOT EXISTS idx_match_history_played_at ON match_history(played_at);
-CREATE INDEX IF NOT EXISTS idx_daily_challenges_user_id ON daily_challenges(user_id);
+CREATE INDEX IF NOT EXISTS idx_daily_challenges_user_date ON daily_challenges(user_id, challenge_date);
 `;
 
 // SQLite-compatible schema (for FileDB)
@@ -75,8 +88,8 @@ const sqliteSchemaSQL = `
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   username TEXT NOT NULL UNIQUE,
-  email TEXT NOT NULL UNIQUE,
-  password TEXT NOT NULL,
+  email TEXT,
+  password TEXT,
   avatar_id TEXT DEFAULT '👤',
   level INTEGER DEFAULT 1,
   xp INTEGER DEFAULT 0,
@@ -84,7 +97,6 @@ CREATE TABLE IF NOT EXISTS users (
   expires_at DATETIME,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-
 
 -- Word categories table
 CREATE TABLE IF NOT EXISTS word_categories (
@@ -99,8 +111,13 @@ CREATE TABLE IF NOT EXISTS player_stats (
   games_played INTEGER DEFAULT 0,
   games_won INTEGER DEFAULT 0,
   total_score INTEGER DEFAULT 0,
+  words_drawn INTEGER DEFAULT 0,
   words_guessed INTEGER DEFAULT 0,
-  drawings_made INTEGER DEFAULT 0,
+  total_play_time INTEGER DEFAULT 0,
+  current_streak INTEGER DEFAULT 0,
+  best_streak INTEGER DEFAULT 0,
+  last_played_at DATETIME,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
@@ -108,36 +125,44 @@ CREATE TABLE IF NOT EXISTS player_stats (
 CREATE TABLE IF NOT EXISTS match_history (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
-  result TEXT NOT NULL,
+  room_id TEXT,
+  game_mode TEXT DEFAULT 'classic',
   score INTEGER DEFAULT 0,
-  mode TEXT DEFAULT 'classic',
+  position INTEGER,
+  words_guessed INTEGER DEFAULT 0,
+  words_drawn INTEGER DEFAULT 0,
+  play_time INTEGER DEFAULT 0,
+  won BOOLEAN DEFAULT 0,
   played_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
 -- Daily challenges table
 CREATE TABLE IF NOT EXISTS daily_challenges (
-  id TEXT PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id TEXT NOT NULL,
-  challenge_type TEXT NOT NULL,
-  description TEXT NOT NULL,
+  challenge_date DATE NOT NULL,
+  challenge_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
   target INTEGER NOT NULL,
   progress INTEGER DEFAULT 0,
   completed BOOLEAN DEFAULT 0,
-  reward_xp INTEGER DEFAULT 0,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  reward INTEGER DEFAULT 0,
   expires_at DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, challenge_date, challenge_id),
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_users_guest_expires ON users(is_guest, expires_at) WHERE is_guest = 1;
 CREATE INDEX IF NOT EXISTS idx_match_history_user_id ON match_history(user_id);
 CREATE INDEX IF NOT EXISTS idx_match_history_played_at ON match_history(played_at);
-CREATE INDEX IF NOT EXISTS idx_daily_challenges_user_id ON daily_challenges(user_id);
+CREATE INDEX IF NOT EXISTS idx_daily_challenges_user_date ON daily_challenges(user_id, challenge_date);
 `;
-
 
 // Default word categories
 const defaultCategories = [
@@ -195,23 +220,36 @@ export async function runMigrations(dbInstance?: any, isPg?: boolean) {
       }
       
       // Add missing columns to existing tables
-      try {
-        await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_guest BOOLEAN DEFAULT FALSE');
-        console.log('[DB] Added is_guest column');
-      } catch (err: any) {
-        console.log('[DB] is_guest column check:', err.message);
-      }
+      const columnsToAdd = [
+        { table: 'users', column: 'is_guest', type: 'BOOLEAN DEFAULT FALSE' },
+        { table: 'users', column: 'expires_at', type: 'TIMESTAMP' },
+        { table: 'player_stats', column: 'words_drawn', type: 'INTEGER DEFAULT 0' },
+        { table: 'player_stats', column: 'words_guessed', type: 'INTEGER DEFAULT 0' },
+        { table: 'player_stats', column: 'total_play_time', type: 'INTEGER DEFAULT 0' },
+        { table: 'player_stats', column: 'current_streak', type: 'INTEGER DEFAULT 0' },
+        { table: 'player_stats', column: 'best_streak', type: 'INTEGER DEFAULT 0' },
+        { table: 'player_stats', column: 'last_played_at', type: 'TIMESTAMP' },
+        { table: 'player_stats', column: 'updated_at', type: 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP' },
+        { table: 'match_history', column: 'room_id', type: 'TEXT' },
+        { table: 'match_history', column: 'game_mode', type: 'TEXT DEFAULT \'classic\'' },
+        { table: 'match_history', column: 'position', type: 'INTEGER' },
+        { table: 'match_history', column: 'words_guessed', type: 'INTEGER DEFAULT 0' },
+        { table: 'match_history', column: 'words_drawn', type: 'INTEGER DEFAULT 0' },
+        { table: 'match_history', column: 'play_time', type: 'INTEGER DEFAULT 0' },
+        { table: 'match_history', column: 'won', type: 'BOOLEAN DEFAULT FALSE' }
+      ];
       
-      try {
-        await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP');
-        console.log('[DB] Added expires_at column');
-      } catch (err: any) {
-        console.log('[DB] expires_at column check:', err.message);
+      for (const { table, column, type } of columnsToAdd) {
+        try {
+          await pool.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${type}`);
+          console.log(`[DB] Added ${column} to ${table}`);
+        } catch (err: any) {
+          console.log(`[DB] ${column} column check:`, err.message);
+        }
       }
       
       console.log('[DB] PostgreSQL migrations completed');
     } else {
-
       // FileDB/SQLite migrations
       if (dbInstance) {
         const statements = sqliteSchemaSQL.split(';').filter(s => s.trim());
@@ -240,7 +278,6 @@ export async function runMigrations(dbInstance?: any, isPg?: boolean) {
     // Don't throw - let the app continue
   }
 }
-
 
 async function seedCategories(dbInstance?: any, isPg?: boolean) {
   try {
@@ -290,7 +327,6 @@ async function seedCategories(dbInstance?: any, isPg?: boolean) {
     // Don't throw - let the app continue
   }
 }
-
 
 // Legacy export for compatibility
 export async function seedDefaultCategories(dbInstance?: any, isPg?: boolean) {

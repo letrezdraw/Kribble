@@ -5,7 +5,8 @@ This guide explains how to run the Kribble project locally for development witho
 
 ## Architecture
 - **Client**: Vite React app (runs on port 5173 by default)
-- **Server**: Express + Socket.IO (runs on port 3001 by default)
+- **Server**: Express + Socket.IO (runs on port 3000 by default)
+
 - **Database**: SQLite (local file)
 
 ## Quick Start
@@ -26,8 +27,9 @@ cd client && npm install
 The project uses environment files for different environments:
 
 - **Development**: `client/.env.development` (already configured)
-  - `VITE_API_URL=http://localhost:3001`
-  - `VITE_SOCKET_URL=http://localhost:3001`
+  - `VITE_API_URL=http://localhost:3000`
+  - `VITE_SOCKET_URL=http://localhost:3000`
+
 
 - **Production**: `client/.env.production` (uses relative URLs for same-origin)
 
@@ -35,8 +37,9 @@ The project uses environment files for different environments:
 ```bash
 cd server
 npm run dev
-# Server runs on http://localhost:3001
+# Server runs on http://localhost:3000
 ```
+
 
 ### 4. Start the Client (in a new terminal)
 ```bash
@@ -51,15 +54,16 @@ Navigate to: `http://localhost:5173`
 ## How It Works
 
 ### Client → Server Communication
-1. **API Requests**: Client uses `VITE_API_URL` (http://localhost:3001) for REST API calls
+1. **API Requests**: Client uses `VITE_API_URL` (http://localhost:3000) for REST API calls
 2. **Socket.IO**: Client connects to same URL for real-time communication
 3. **CORS**: Server allows requests from `localhost:5173` in development mode
 
 ### Environment Variables
 | Variable | Development | Production |
 |----------|-------------|------------|
-| `VITE_API_URL` | `http://localhost:3001` | `''` (relative) |
-| `VITE_SOCKET_URL` | `http://localhost:3001` | `''` (relative) |
+| `VITE_API_URL` | `http://localhost:3000` | `''` (relative) |
+| `VITE_SOCKET_URL` | `http://localhost:3000` | `''` (relative) |
+
 
 ## Server CORS Configuration
 The server automatically configures CORS based on `NODE_ENV`:
@@ -75,9 +79,10 @@ The server automatically configures CORS based on `NODE_ENV`:
 ## Common Issues
 
 ### "Cannot connect to server"
-- Ensure server is running on port 3001
+- Ensure server is running on port 3000
 - Check that `client/.env.development` has correct URL
 - Verify no firewall blocking the connection
+
 
 ### CORS errors
 - Server must be running before client
@@ -99,7 +104,8 @@ No code changes needed! The same codebase works for production:
 - `client/.env.development` - Development API URL
 - `client/.env.production` - Production (relative URLs)
 - `client/src/services/api.ts` - Uses `VITE_API_URL`
-- `client/src/contexts/SocketContext.tsx` - Uses `VITE_API_URL`
+- `client/src/contexts/SocketContext.tsx` - Uses `VITE_SOCKET_URL`
+
 - `server/src/index.ts` - CORS configuration for development
 
 ## No Production Impact

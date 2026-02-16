@@ -173,23 +173,43 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
 
 
-    socket.on('room:joined', (data: { room: Room & { gameState?: any }; currentPlayerId?: string }) => {
+    socket.on('room:joined', (data: { room: Room & { gameState?: any }; currentPlayerId?: string; isRejoiningGame?: boolean }) => {
       console.log('[GameContext] room:joined received:', data);
       setRoom(data.room);
       if (data.currentPlayerId) {
         setCurrentPlayerId(data.currentPlayerId);
         const currentPlayer = data.room.players.find(p => p.id === data.currentPlayerId);
         setIsHost(currentPlayer?.isHost || false);
+        setIsDrawer(currentPlayer?.isDrawer || false);
       }
-      // Set game state based on room's current state
-      const roomPhase = data.room.gameState?.phase || 'lobby';
-      setGameState(prev => ({
-        ...initialGameState,
-        phase: roomPhase,
-        currentRound: data.room.gameState?.currentRound || 0,
-        totalRounds: data.room.settings?.rounds || 3,
-      }));
+      
+      // Check if rejoining an active game
+      if (data.isRejoiningGame && data.room.gameState) {
+        console.log('[GameContext] Rejoining active game, restoring state:', data.room.gameState);
+        const gs = data.room.gameState;
+        setGameState(prev => ({
+          ...prev,
+          phase: gs.phase || 'lobby',
+          currentRound: gs.currentRound || 1,
+          totalRounds: gs.totalRounds || data.room.settings?.rounds || 3,
+          currentWord: gs.currentWord || '',
+          wordHints: gs.wordHints || [],
+          hintsRemaining: gs.hintsRemaining ?? 3,
+          timeRemaining: gs.timeRemaining ?? 0,
+          currentDrawer: gs.drawerId ? data.room.players.find(p => p.id === gs.drawerId) || null : null,
+        }));
+      } else {
+        // Set game state based on room's current state (for lobby)
+        const roomPhase = data.room.gameState?.phase || 'lobby';
+        setGameState(prev => ({
+          ...initialGameState,
+          phase: roomPhase,
+          currentRound: data.room.gameState?.currentRound || 0,
+          totalRounds: data.room.settings?.rounds || 3,
+        }));
+      }
     });
+
 
 
 
@@ -300,7 +320,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setIsDrawer(true);
     });
 
-    socket.on('game:word-selected', (data: { word: string; blanks: string; hints: number }) => {
+    socket.on('game:word-selected', (data: { word: string; blanks: string; hints: number; isDrawer?: boolean; isRejoin?: boolean }) => {
+      console.log('[GameContext] game:word-selected received:', { isDrawer: data.isDrawer, isRejoin: data.isRejoin });
       setGameState(prev => ({
         ...prev,
         phase: 'drawing',
@@ -308,7 +329,12 @@ export function GameProvider({ children }: { children: ReactNode }) {
         wordHints: data.blanks.split(''),
         hintsRemaining: data.hints,
       }));
+      // Update isDrawer based on server response
+      if (data.isDrawer !== undefined) {
+        setIsDrawer(data.isDrawer);
+      }
     });
+
 
     socket.on('game:drawer-changed', (data: { drawer: Player }) => {
       setGameState(prev => ({
@@ -373,7 +399,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     });
 
 
-    socket.on('game:round-end', (data: { word: string; scores: { playerId: string; score: number }[] }) => {
+    socket.on('game:round-end', (data: { word: string; scores: { playerId: string; score: number }[]; roundPoints?: any[] }) => {
       console.log('[GameContext] game:round-end received:', data);
       setGameState(prev => ({
         ...prev,
@@ -395,8 +421,26 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setIsDrawer(false);
     });
 
+    // Handle turn-end event (between turns in same round)
+    socket.on('game:turn-end', (data: { word: string; scores: { playerId: string; score: number }[]; turnPoints?: any[] }) => {
+      console.log('[GameContext] game:turn-end received:', data);
+      // Update scores but stay in drawing phase (next turn starting)
+      setRoom(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          players: prev.players.map(p => {
+            const scoreData = data.scores.find(s => s.playerId === p.id);
+            return scoreData ? { ...p, score: scoreData.score } : p;
+          })
+        };
+      });
+    });
 
-    socket.on('game:end', (data: { finalScores: { playerId: string; username: string; score: number; avatarId: string }[]; rankings: any[] }) => {
+
+
+    socket.on('game:end', (data: { finalScores: { playerId: string; username: string; score: number; avatarId: string }[]; rankings: any[]; playAgain?: boolean }) => {
+      console.log('[GameContext] game:end received:', data);
       setGameState(prev => ({
         ...prev,
         phase: 'gameEnd',
@@ -404,6 +448,24 @@ export function GameProvider({ children }: { children: ReactNode }) {
       }));
       setRankings(data.rankings);
     });
+
+    // Handle PHASE_CHANGE events from server (authoritative state sync)
+    socket.on('PHASE_CHANGE', (data: { phase: string; round?: number; turn?: number; totalRounds?: number; drawerId?: string; word?: string; wordLength?: number }) => {
+      console.log('[GameContext] PHASE_CHANGE received:', data);
+      setGameState(prev => ({
+        ...prev,
+        phase: data.phase as GamePhase,
+        currentRound: data.round ?? prev.currentRound,
+        totalRounds: data.totalRounds ?? prev.totalRounds,
+      }));
+      
+      // Update isDrawer based on drawerId
+      if (data.drawerId && room) {
+        const currentPlayer = room.players.find(p => p.id === currentPlayerId);
+        setIsDrawer(currentPlayer?.id === data.drawerId);
+      }
+    });
+
 
     socket.on('game:reset', (data: { room: Room }) => {
       setRoom(data.room);
@@ -436,8 +498,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
       socket.off('game:guess-correct');
 
       socket.off('game:round-end');
+      socket.off('game:turn-end');
       socket.off('game:end');
       socket.off('game:reset');
+      socket.off('PHASE_CHANGE');
+
     };
   }, [socket, currentPlayerId]);
 

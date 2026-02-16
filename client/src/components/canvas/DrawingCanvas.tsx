@@ -247,13 +247,25 @@ export default function DrawingCanvas({
     socket.on('draw:undo', () => undoInternal());
     socket.on('draw:redo', () => redoInternal());
 
+    // Canvas sync for rejoining players - receive current canvas state
+    socket.on('canvas:sync', (data: { strokes: Stroke[] }) => {
+      console.log('[DrawingCanvas] canvas:sync received - restoring', data.strokes?.length || 0, 'strokes');
+      if (data.strokes && data.strokes.length > 0) {
+        strokesRef.current = data.strokes;
+        redoStackRef.current = [];
+        redrawAllStrokes(staticCtxRef.current!, data.strokes);
+      }
+    });
+
     return () => {
       socket.off('draw:stroke');
       socket.off('draw:clear');
       socket.off('CLEAR_CANVAS');
       socket.off('draw:undo');
       socket.off('draw:redo');
+      socket.off('canvas:sync');
     };
+
   }, [socket]);
 
 

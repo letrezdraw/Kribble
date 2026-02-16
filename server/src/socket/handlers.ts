@@ -511,6 +511,9 @@ export function setupSocketHandlers(io: Server) {
       socketToRoom.set(socket.id, data.roomId);
 
       
+      // Check if game is already in progress
+      const isGameInProgress = room.gameState.phase !== 'lobby' && room.gameState.phase !== 'gameEnd';
+      
       // Notify player
       socket.emit('room:joined', { 
         room: { 
@@ -518,10 +521,58 @@ export function setupSocketHandlers(io: Server) {
           name: room.name, 
           players: room.players.map(p => ({ id: p.id, username: p.username, avatarId: p.avatarId, score: p.score, isDrawer: p.isDrawer, isHost: p.isHost })),
           maxPlayers: room.maxPlayers, 
-          settings: room.settings 
+          settings: room.settings,
+          gameState: isGameInProgress ? {
+            phase: room.gameState.phase,
+            currentRound: room.gameState.currentRound,
+            currentTurn: room.gameState.currentTurn,
+            totalRounds: room.gameState.totalRounds,
+            currentWord: room.gameState.currentWord,
+            wordHints: room.gameState.wordHints,
+            hintsRemaining: room.gameState.hintsRemaining,
+            timeRemaining: room.gameState.timeRemaining,
+            drawerId: room.players[room.gameState.currentDrawerIndex]?.id
+          } : undefined
         },
-        currentPlayerId: player.id
+        currentPlayerId: player.id,
+        isRejoiningGame: isGameInProgress
       });
+      
+      // If game is in progress, send additional game state events
+      if (isGameInProgress) {
+        console.log('[room:join] Player rejoining active game, sending game state');
+        
+        // Send current word state (with blanks for non-drawers)
+        const isDrawer = player.isDrawer;
+        socket.emit('game:word-selected', {
+          word: isDrawer ? room.gameState.currentWord : room.gameState.currentWord,
+          blanks: room.gameState.wordHints.join(' '),
+          hints: room.gameState.hintsRemaining,
+          drawTime: room.settings.roundTime,
+          isRejoin: true
+        });
+        
+        // Send current timer
+        socket.emit('game:timer-update', { 
+          timeRemaining: room.gameState.timeRemaining 
+        });
+        
+        // Send phase change to put them in the right UI state
+        socket.emit('PHASE_CHANGE', {
+          phase: room.gameState.phase,
+          round: room.gameState.currentRound,
+          turn: room.gameState.currentTurn,
+          totalRounds: room.gameState.totalRounds,
+          drawerId: room.players[room.gameState.currentDrawerIndex]?.id
+        });
+        
+        // If in drawing phase, send current canvas state if available
+        if (room.gameState.phase === 'drawing' && room.canvasState && room.canvasState.length > 0) {
+          console.log('[room:join] Sending canvas state to rejoining player');
+          socket.emit('canvas:sync', { strokes: room.canvasState });
+        }
+      }
+
       
       // Notify others
       socket.to(data.roomId).emit('room:player-joined', { player: { id: player.id, username: player.username, avatarId: player.avatarId, score: player.score, isDrawer: player.isDrawer, isHost: player.isHost } });
@@ -645,8 +696,10 @@ export function setupSocketHandlers(io: Server) {
       const roomId = socketToRoom.get(socket.id);
       if (!roomId) return;
       
-      socket.to(roomId).emit('draw:clear', { playerId: socket.id });
+      // Broadcast to ALL players including sender (so drawer sees canvas clear too)
+      io.to(roomId).emit('draw:clear', { playerId: socket.id });
     });
+
 
     socket.on('draw:undo', () => {
       const roomId = socketToRoom.get(socket.id);
@@ -1458,21 +1511,36 @@ function startDrawingPhase(room: Room, io: Server) {
   room.gameState.hintsRemaining = room.settings.hints || 3;
   room.gameState.timeRemaining = room.settings.roundTime;
   
-  // Broadcast phase change to all clients
+  const drawer = room.players[room.gameState.currentDrawerIndex];
+  
+  // Broadcast phase change to all clients FIRST
   io.to(room.id).emit('PHASE_CHANGE', {
     phase: 'drawing',
-    drawerId: room.players[room.gameState.currentDrawerIndex]?.id,
+    drawerId: drawer?.id,
     wordLength: room.gameState.currentWord.length,
     round: room.gameState.currentRound
   });
   
-  // Emit word selected to all players
-  io.to(room.id).emit('game:word-selected', { 
+  // Emit to DRAWER with full word
+  io.to(drawer.socketId).emit('game:word-selected', { 
     word: room.gameState.currentWord, 
     blanks: room.gameState.wordHints.join(' '), 
     hints: room.gameState.hintsRemaining,
-    drawTime: room.settings.roundTime
+    drawTime: room.settings.roundTime,
+    isDrawer: true
   });
+  
+  // Emit to ALL OTHER PLAYERS with blanks only
+  // Use io.except() to exclude the drawer
+  io.except(drawer.socketId).emit('game:word-selected', { 
+    word: room.gameState.currentWord, 
+    blanks: room.gameState.wordHints.join(' '), 
+    hints: room.gameState.hintsRemaining,
+    drawTime: room.settings.roundTime,
+    isDrawer: false
+  });
+
+
 
   // Set up automatic hint revelation
   const hintsCount = room.settings.hints || 3;

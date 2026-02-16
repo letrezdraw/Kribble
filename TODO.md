@@ -73,15 +73,64 @@
 - [ ] Add grid pattern option
 - [ ] Transparent background option
 
+## Recently Completed (Game Logic Fixes)
+
+### 9. Automatic Hint System
+**Status**: ✅ FIXED
+**Description**: Hints were clickable but should reveal automatically over time
+**Fix Applied**:
+- Server now schedules automatic hint revelations at calculated intervals during drawing phase
+- Hints reveal word characters one by one based on round time and hint count settings
+- Client shows non-clickable hint display with "X hints remaining" tooltip
+- Chat message announces when hints are revealed
+
+### 10. Canvas Clear on Drawer Change
+**Status**: ✅ FIXED
+**Description**: Canvas wasn't clearing when new drawer started their turn
+**Fix Applied**:
+- Server emits `CLEAR_CANVAS` event when drawer changes
+- Client listens for `CLEAR_CANVAS` and clears local canvas state
+- Canvas now broadcasts clear to ALL players including the sender (using `io.to()` instead of `socket.to()`)
+
+### 11. Rejoin Game During Active Round
+**Status**: ✅ FIXED
+**Description**: Players who reload/rejoin during active game went to waiting room instead of joining game
+**Fix Applied**:
+- Server detects when player joins during active game phase (not lobby or gameEnd)
+- Sends `isRejoiningGame: true` flag with room:joined event
+- Server emits game state: `gameState`, `word-selected`, `timer-update`, `PHASE_CHANGE`
+- Server sends `canvas:sync` with current strokes to restore drawing
+- Client GameContext handles rejoin state and skips lobby overlay
+- Client DrawingCanvas listens for `canvas:sync` to restore strokes
+
+### 12. Guest Login 500 Error
+**Status**: ✅ FIXED
+**Description**: Guest login returned 500 error after deployment
+**Fix Applied**:
+- FileDB user insert handler updated to accept all 9 parameters (id, username, email, password, avatar_id, level, xp, is_guest, expires_at)
+- Previously only handled 7 parameters, causing SQL error for guest users
+
+### 13. TypeScript Compilation Error
+**Status**: ✅ FIXED
+**Description**: Build failed with `Cannot find name 'endTurn'` error
+**Fix Applied**:
+- Added `endTurn(room: Room, io: Server)` function to handlers.ts
+- Function properly ends current turn and transitions to round end or next drawer
+
 ## Testing Checklist
 
 After fixes, test:
-- [ ] Draw 3 strokes, undo 2, redo 1 - should show 2 strokes
-- [ ] Zoom to 200%, draw line - should appear at cursor position
-- [ ] Rotate 90°, draw horizontal line - should appear horizontal in view
-- [ ] Set opacity to 50%, draw over existing stroke - should see through
-- [ ] Create 3 layers, draw on each, toggle visibility - should show/hide correctly
-- [ ] Mobile: Pinch zoom, pan, draw - should work smoothly
+- [x] Draw 3 strokes, undo 2, redo 1 - should show 2 strokes
+- [x] Zoom to 200%, draw line - should appear at cursor position
+- [x] Rotate 90°, draw horizontal line - should appear horizontal in view
+- [x] Set opacity to 50%, draw over existing stroke - should see through
+- [x] Create 3 layers, draw on each, toggle visibility - should show/hide correctly
+- [x] Mobile: Pinch zoom, pan, draw - should work smoothly
+- [x] Join game during active round - should see current drawing and word hints
+- [x] Wait for hint - should reveal automatically without clicking
+- [x] New drawer starts - canvas should clear for everyone
+- [x] Guest login - should work without 500 error
+
 
 ## Implementation Order
 

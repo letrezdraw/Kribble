@@ -135,14 +135,15 @@ class FileDB {
       run: (...params: any[]) => {
         // INSERT or UPDATE
         if (lowerSql.includes('insert into users')) {
-          const [id, username, email, password, avatar_id, level, xp] = params;
+          const [id, username, email, password, avatar_id, level, xp, is_guest, expires_at] = params;
           this.data.users[id] = {
-            id, username, email, password, avatar_id, level, xp,
+            id, username, email, password, avatar_id, level, xp, is_guest, expires_at,
             created_at: new Date().toISOString()
           };
           this.save();
           return { lastInsertRowid: id, changes: 1 };
         }
+
         if (lowerSql.includes('update users')) {
           const userId = params[params.length - 1];
           if (this.data.users[userId]) {
