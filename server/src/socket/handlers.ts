@@ -1568,7 +1568,91 @@ function startNewRound(room: Room, io: Server) {
   startWordSelection(room, io);
 }
 
+function endTurn(room: Room, io: Server) {
+  // Clear timer if still running
+  const timer = roomTimers.get(room.id);
+  if (timer) {
+    clearInterval(timer);
+    roomTimers.delete(room.id);
+  }
+  
+  // Clear hint timers
+  const hintTimers = roomHintTimers.get(room.id);
+  if (hintTimers) {
+    hintTimers.forEach(t => clearTimeout(t));
+    roomHintTimers.delete(room.id);
+  }
+
+  room.gameState.phase = 'turnEnd';
+  
+  // Broadcast phase change to all clients
+  io.to(room.id).emit('PHASE_CHANGE', {
+    phase: 'turnEnd',
+    round: room.gameState.currentRound,
+    word: room.gameState.currentWord
+  });
+  
+  // Calculate and award points based on guess order
+  const correctGuessers = room.players.filter(p => p.hasGuessedCorrectly && !p.isDrawer);
+  const timeRemaining = room.gameState.timeRemaining;
+  
+  correctGuessers.forEach((player, index) => {
+    const basePoints = Math.max(100 - (index * 10), 10);
+    const timeBonus = Math.floor(timeRemaining / 10);
+    const totalPoints = basePoints + timeBonus;
+    player.score += totalPoints;
+    console.log(`[endTurn] Awarded ${totalPoints} points to ${player.username}`);
+  });
+  
+  // Emit turn end with results
+  io.to(room.id).emit('game:turn-end', { 
+    word: room.gameState.currentWord, 
+    scores: room.players.map(p => ({ playerId: p.id, score: p.score })),
+    turnPoints: correctGuessers.map((p, index) => ({
+      playerId: p.id,
+      username: p.username,
+      points: Math.max(100 - (index * 10), 10) + Math.floor(timeRemaining / 10),
+      position: index + 1
+    }))
+  });
+
+  // Check if round is complete (all players have drawn)
+  const isRoundComplete = room.gameState.currentTurn >= room.players.length;
+  
+  if (isRoundComplete) {
+    // Round complete - show round scoreboard
+    console.log(`[endTurn] Round ${room.gameState.currentRound} complete!`);
+    setTimeout(() => {
+      endRound(room, io);
+    }, 3000);
+  } else {
+    // Continue to next turn in same round
+    room.gameState.currentTurn++;
+    console.log(`[endTurn] Starting turn ${room.gameState.currentTurn} of round ${room.gameState.currentRound}`);
+    
+    setTimeout(() => {
+      room.gameState.phase = 'selection';
+      io.to(room.id).emit('game:starting', { 
+        round: room.gameState.currentRound, 
+        turn: room.gameState.currentTurn,
+        totalRounds: room.settings.rounds 
+      });
+      
+      io.to(room.id).emit('PHASE_CHANGE', {
+        phase: 'selection',
+        round: room.gameState.currentRound,
+        turn: room.gameState.currentTurn,
+        totalRounds: room.settings.rounds,
+        drawerId: room.players[room.gameState.currentDrawerIndex]?.id
+      });
+      
+      startWordSelection(room, io);
+    }, 3000);
+  }
+}
+
 function endRound(room: Room, io: Server) {
+
   // Clear timer if still running
   const timer = roomTimers.get(room.id);
   if (timer) {
