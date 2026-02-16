@@ -193,8 +193,25 @@ export async function runMigrations(dbInstance?: any, isPg?: boolean) {
           }
         }
       }
+      
+      // Add missing columns to existing tables
+      try {
+        await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_guest BOOLEAN DEFAULT FALSE');
+        console.log('[DB] Added is_guest column');
+      } catch (err: any) {
+        console.log('[DB] is_guest column check:', err.message);
+      }
+      
+      try {
+        await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP');
+        console.log('[DB] Added expires_at column');
+      } catch (err: any) {
+        console.log('[DB] expires_at column check:', err.message);
+      }
+      
       console.log('[DB] PostgreSQL migrations completed');
     } else {
+
       // FileDB/SQLite migrations
       if (dbInstance) {
         const statements = sqliteSchemaSQL.split(';').filter(s => s.trim());
