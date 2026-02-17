@@ -20,19 +20,31 @@ export function initCanvas(canvas: HTMLCanvasElement): CanvasRenderingContext2D 
   canvas.height = CANVAS_SIZE;
   
   const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = BG_COLOR;
-  ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+  // Don't fill with background - background layer handles white fill
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   
   return ctx;
 }
 
-export function clearCanvas(ctx: CanvasRenderingContext2D): void {
-  ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-  // Don't fill with background color - let strokes (including fills) be redrawn
-  // This preserves filled colors when undoing
+export function initBackgroundCanvas(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+  canvas.width = CANVAS_SIZE;
+  canvas.height = CANVAS_SIZE;
+  
+  const ctx = canvas.getContext('2d')!;
+  // Fill with white background - this layer is locked and never cleared
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+  
+  return ctx;
 }
+
+
+export function clearCanvas(ctx: CanvasRenderingContext2D): void {
+  // Only clear the drawing layer - background stays intact
+  ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+}
+
 
 
 export function setupBrush(ctx: CanvasRenderingContext2D, color: string, size: number, opacity: number): void {
@@ -44,8 +56,8 @@ export function setupBrush(ctx: CanvasRenderingContext2D, color: string, size: n
 }
 
 export function setupEraser(ctx: CanvasRenderingContext2D, size: number): void {
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.strokeStyle = BG_COLOR;
+  // FIX: Use destination-out to actually erase pixels (make transparent)
+  ctx.globalCompositeOperation = 'destination-out';
   ctx.lineWidth = size;
   ctx.globalAlpha = 1;
 }
@@ -100,10 +112,16 @@ export function drawPressureStroke(
         const interpStampRadius = baseRadius * interpMappedPressure;
         const interpOpacity = baseOpacity * interpMappedPressure;
 
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = isEraser ? BG_COLOR : color;
-        // FIXED: Clamp opacity to prevent accumulation artifacts
-        ctx.globalAlpha = isEraser ? 1 : Math.min(1, interpOpacity);
+        // FIX: Use destination-out for eraser to actually erase pixels
+        if (isEraser) {
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.globalAlpha = 1;
+        } else {
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.fillStyle = color;
+          // FIXED: Clamp opacity to prevent accumulation artifacts
+          ctx.globalAlpha = Math.min(1, interpOpacity);
+        }
 
         ctx.beginPath();
         ctx.arc(interpX, interpY, interpStampRadius, 0, Math.PI * 2);
@@ -113,10 +131,16 @@ export function drawPressureStroke(
       // Single stamp for small gaps
       const opacity = baseOpacity * mappedPressure;
 
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = isEraser ? BG_COLOR : color;
-      // FIXED: Clamp opacity
-      ctx.globalAlpha = isEraser ? 1 : Math.min(1, opacity);
+      // FIX: Use destination-out for eraser to actually erase pixels
+      if (isEraser) {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = color;
+        // FIXED: Clamp opacity
+        ctx.globalAlpha = Math.min(1, opacity);
+      }
 
       ctx.beginPath();
       ctx.arc(p.x, p.y, stampRadius, 0, Math.PI * 2);
@@ -169,8 +193,8 @@ export function drawEraserStroke(
   ctx.beginPath();
   ctx.moveTo(points[0].x, points[0].y);
   
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.strokeStyle = BG_COLOR;
+  // FIX: Use destination-out to actually erase pixels (make transparent)
+  ctx.globalCompositeOperation = 'destination-out';
   ctx.lineWidth = size;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -270,11 +294,11 @@ export function drawText(
   ctx.restore();
 }
 
-// Color tolerance for gap detection
-const COLOR_TOLERANCE = 32;
+// Color tolerance for gap detection - REDUCED for more precise fills
+const COLOR_TOLERANCE = 16;
 const GAP_CLOSURE_RADIUS = 3;
 
-// FIXED: Improved flood fill algorithm
+// FIXED: Improved flood fill algorithm with better boundary detection
 export function floodFill(
   ctx: CanvasRenderingContext2D,
   startX: number,
@@ -314,7 +338,10 @@ export function floodFill(
     return;
   }
   
-  // FIXED: Use a more efficient queue-based approach
+  // Check if we're filling on a transparent/empty canvas
+  const isTransparentTarget = targetA === 0;
+  
+  // Use a more efficient queue-based approach
   const queue: [number, number][] = [[startX, startY]];
   const visited = new Uint8Array(width * height);
   
@@ -323,23 +350,39 @@ export function floodFill(
   
   // Check if color matches target (with tolerance)
   const matchesTarget = (idx: number) => {
-    const dr = Math.abs(data[idx] - targetR);
-    const dg = Math.abs(data[idx + 1] - targetG);
-    const db = Math.abs(data[idx + 2] - targetB);
-    const da = Math.abs(data[idx + 3] - targetA);
-    return (dr + dg + db + da) <= COLOR_TOLERANCE * 2;
+    // For transparent targets, check if pixel is also transparent
+    if (isTransparentTarget) {
+      return data[idx + 3] <= COLOR_TOLERANCE; // Alpha is near 0
+    }
+    
+    // For non-transparent targets, check full color match
+    const dr = data[idx] - targetR;
+    const dg = data[idx + 1] - targetG;
+    const db = data[idx + 2] - targetB;
+    const da = data[idx + 3] - targetA;
+    // Weighted Euclidean distance (human eyes are more sensitive to green)
+    const dist = Math.sqrt(dr * dr * 0.3 + dg * dg * 0.59 + db * db * 0.11 + da * da * 0.5);
+    return dist <= COLOR_TOLERANCE;
   };
   
-  // Check if pixel is a boundary (stroke)
+  // Check if pixel is a boundary (significantly different from target)
   const isBoundary = (idx: number) => {
-    const dr = Math.abs(data[idx] - targetR);
-    const dg = Math.abs(data[idx + 1] - targetG);
-    const db = Math.abs(data[idx + 2] - targetB);
-    return (dr + dg + db) > COLOR_TOLERANCE * 3;
+    // For transparent targets, boundary is any non-transparent pixel
+    if (isTransparentTarget) {
+      return data[idx + 3] > COLOR_TOLERANCE;
+    }
+    
+    // For non-transparent targets, use color distance
+    const dr = data[idx] - targetR;
+    const dg = data[idx + 1] - targetG;
+    const db = data[idx + 2] - targetB;
+    const da = data[idx + 3] - targetA;
+    const dist = Math.sqrt(dr * dr * 0.3 + dg * dg * 0.59 + db * db * 0.11 + da * da * 0.5);
+    return dist > COLOR_TOLERANCE;
   };
   
   let filledCount = 0;
-  const MAX_FILL_PIXELS = width * height * 0.5;
+  const MAX_FILL_PIXELS = width * height; // Allow filling the entire canvas
   
   // BFS flood fill with boundary detection
   while (queue.length > 0 && filledCount < MAX_FILL_PIXELS) {
@@ -365,11 +408,22 @@ export function floodFill(
     visited[key] = 1;
     filledCount++;
     
-    // Fill the pixel
-    data[idx] = fillR;
-    data[idx + 1] = fillG;
-    data[idx + 2] = fillB;
-    data[idx + 3] = fillA;
+    // Fill the pixel with proper alpha blending
+    if (fillA < 255) {
+      // Alpha blending for semi-transparent fills
+      const alpha = fillA / 255;
+      const invAlpha = 1 - alpha;
+      data[idx] = Math.round(fillR * alpha + data[idx] * invAlpha);
+      data[idx + 1] = Math.round(fillG * alpha + data[idx + 1] * invAlpha);
+      data[idx + 2] = Math.round(fillB * alpha + data[idx + 2] * invAlpha);
+      data[idx + 3] = Math.round(fillA + data[idx + 3] * invAlpha);
+    } else {
+      // Opaque fill
+      data[idx] = fillR;
+      data[idx + 1] = fillG;
+      data[idx + 2] = fillB;
+      data[idx + 3] = fillA;
+    }
     
     // Add neighbors (4-directional)
     queue.push([x + 1, y]);
@@ -381,6 +435,8 @@ export function floodFill(
   ctx.putImageData(imageData, 0, 0);
 }
 
+
+
 export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke): void {
   if (stroke.tool === 'shape') {
     drawShape(ctx, stroke);
@@ -389,6 +445,13 @@ export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke): void 
   
   if (stroke.tool === 'text' && stroke.text && stroke.startPoint) {
     drawText(ctx, stroke.startPoint.x, stroke.startPoint.y, stroke.text, stroke.color, stroke.size, stroke.opacity);
+    return;
+  }
+  
+  // Handle clear tool - restore all cleared strokes
+  if (stroke.tool === 'clear' && stroke.clearedStrokes) {
+    // Restore all the strokes that were cleared
+    stroke.clearedStrokes.forEach(clearedStroke => drawStroke(ctx, clearedStroke));
     return;
   }
   
@@ -408,6 +471,7 @@ export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke): void 
     ctx.putImageData(imageData, 0, 0);
     return;
   }
+
   
   const hasPressure = stroke.points.some(p => p.pressure !== undefined) || 
                       (stroke.pressureData && stroke.pressureData.length > 0);

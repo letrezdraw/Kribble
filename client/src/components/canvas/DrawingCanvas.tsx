@@ -7,44 +7,35 @@ import type { Point, Stroke, Transform, ToolType, DrawingCanvasProps } from './t
 import { getPos, getPosFromEvent, getTouchDistance } from './coordinates';
 import {
   initCanvas,
-  setupBrush,
-  setupEraser,
+  initBackgroundCanvas,
   drawPreviewShape,
   drawStroke,
   redrawAllStrokes,
   drawText,
   floodFill,
   drawShape,
+  clearCanvas,
 } from './drawingTools';
+
 
 import { TransformControls } from './TransformControls';
 import { TextInputOverlay } from './TextInput';
-import { BrushSettingsMenu } from './BrushSettingsMenu';
 
 const CANVAS_SIZE = 800;
 
-// Brush settings type
-interface BrushSettings {
-  minSpacing: number;
-  spacingMultiplier: number;
-  interpolationThreshold: number;
-  pressureSmoothing: number;
-  showLivePreview: boolean;
-}
+// Chunk size for multiplayer sync
+const SYNC_CHUNK_SIZE = 10;
+const SYNC_INTERVAL_MS = 50;
 
-const DEFAULT_BRUSH_SETTINGS: BrushSettings = {
-  minSpacing: 0.1,
-  spacingMultiplier: 0.02,
-  interpolationThreshold: 1.01,
-  pressureSmoothing: 0.35,
-  showLivePreview: true,
-};
-
-// Pressure-sensitive point interface
 interface PressurePoint extends Point {
   pressure: number;
   tiltX?: number;
   tiltY?: number;
+}
+
+interface CanvasState {
+  strokes: Stroke[];
+  redoStack: Stroke[];
 }
 
 export default function DrawingCanvas({
@@ -60,174 +51,363 @@ export default function DrawingCanvas({
   onToolChange,
   onBrushSizeChange,
   onBrushColorChange,
-  onBrushOpacityChange,
+  isMobile = false,
 }: DrawingCanvasProps & {
   onToolChange?: (tool: ToolType) => void;
   onBrushSizeChange?: (size: number) => void;
   onBrushColorChange?: (color: string) => void;
-  onBrushOpacityChange?: (opacity: number) => void;
+  isMobile?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const backgroundCanvasRef = useRef<HTMLCanvasElement>(null);
   const staticCanvasRef = useRef<HTMLCanvasElement>(null);
   const liveCanvasRef = useRef<HTMLCanvasElement>(null);
+  const backgroundCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const staticCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const liveCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const { socket } = useSocket();
 
-  // RAF rendering state
-  const needsRenderRef = useRef(false);
-  const rafIdRef = useRef<number | null>(null);
 
-  // Gesture state machine for mobile
-  type GestureState = 'idle' | 'drawing' | 'panning' | 'zooming' | 'multi-touch';
-  const [gestureState, setGestureState] = useState<GestureState>('idle');
+  // Canvas state
+  const canvasStateRef = useRef<CanvasState>({ strokes: [], redoStack: [] });
+  const currentStrokeRef = useRef<PressurePoint[]>([]);
+  const currentStrokeIdRef = useRef<string>('');
   
-  // Legacy states for compatibility
+  // UI state
   const [isDrawing, setIsDrawing] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [isZooming, setIsZooming] = useState(false);
-  const [isBrushSizing, setIsBrushSizing] = useState(false);
-  const [displaySize, setDisplaySize] = useState({ width: CANVAS_SIZE, height: CANVAS_SIZE });
   const [showTransformControls, setShowTransformControls] = useState(false);
-
-  // Detect mobile for default zoom
-  const isMobile = window.innerWidth < 768;
-  
-  const [transform, setTransform] = useState<Transform>({
-    scale: isMobile ? 0.5 : 1,
-    translateX: 0,
-    translateY: 0,
-    rotation: 0,
-  });
-
-  
-  // Use ref to always have latest transform for coordinate calculations
-  const transformRef = useRef<Transform>(transform);
-  useEffect(() => {
-    transformRef.current = transform;
-  }, [transform]);
-
-
-  const strokesRef = useRef<Stroke[]>([]);
-  const redoStackRef = useRef<Stroke[]>([]);
-  const currentStrokeRef = useRef<PressurePoint[]>([]);
-  const lastRenderedIndexRef = useRef<number>(0);
-  const shapeStartRef = useRef<Point | null>(null);
-
-  const panStartRef = useRef<Point | null>(null);
-  const zoomStartRef = useRef<{ x: number; y: number; initialScale: number } | null>(null);
-  const brushSizeStartRef = useRef<{ x: number; initialSize: number } | null>(null);
-  const lastTouchDistanceRef = useRef<number | null>(null);
-  const currentPressureRef = useRef<number>(1);
-  const smoothedPressureRef = useRef<number>(1);
-  const isPenActiveRef = useRef<boolean>(false);
-  const keysPressedRef = useRef<Set<string>>(new Set());
-  
-  // Pressure smoothing constant (0-1, higher = more smoothing)
-  const PRESSURE_SMOOTHING = 0.35;
-
-  // Pressure curve with minimum stroke size (2-5px) and tapering support
-  const MIN_STROKE_SIZE_PX = 3; // Minimum stroke size in pixels
-  const applyPressureCurve = (pressure: number, isTapering: boolean = false): number => {
-    const clampedPressure = Math.max(0, Math.min(1, pressure));
-    if (isTapering) {
-      // When tapering, go to 0
-      return clampedPressure;
-    }
-    // Normal pressure: map to range [minSize, maxSize]
-    const minRatio = Math.min(0.3, (MIN_STROKE_SIZE_PX * 2) / brushSize);
-    return minRatio + Math.pow(clampedPressure, 0.7) * (1 - minRatio);
-  };
-
   const [textInput, setTextInput] = useState({ visible: false, x: 0, y: 0, value: '' });
-  
-  // Brush settings with right-click menu
-  const [brushSettings, setBrushSettings] = useState<BrushSettings>(DEFAULT_BRUSH_SETTINGS);
   const [contextMenu, setContextMenu] = useState<{ isOpen: boolean; x: number; y: number }>({
     isOpen: false,
     x: 0,
     y: 0,
   });
 
-  // Initialize canvases - ONLY ONCE on mount
+  // Transform - mobile 50%, desktop 100%
+  const [transform, setTransform] = useState<Transform>({
+    scale: isMobile ? 0.5 : 1.0,
+    translateX: 0,
+    translateY: 0,
+    rotation: 0,
+  });
+
+  const transformRef = useRef<Transform>(transform);
   useEffect(() => {
-    if (!staticCanvasRef.current || !liveCanvasRef.current) return;
+    transformRef.current = transform;
+  }, [transform]);
+
+  // Refs for drawing
+  const shapeStartRef = useRef<Point | null>(null);
+  const panStartRef = useRef<Point | null>(null);
+  const zoomStartRef = useRef<{ x: number; y: number; initialScale: number } | null>(null);
+  const lastTouchDistanceRef = useRef<number | null>(null);
+  const smoothedPressureRef = useRef<number>(1);
+  const keysPressedRef = useRef<Set<string>>(new Set());
+  const lastSyncTimeRef = useRef<number>(0);
+  const syncedPointCountRef = useRef<number>(0);
+
+  // Initialize canvases
+  useEffect(() => {
+    if (!backgroundCanvasRef.current || !staticCanvasRef.current || !liveCanvasRef.current) return;
     
+    const backgroundCanvas = backgroundCanvasRef.current;
     const staticCanvas = staticCanvasRef.current;
     const liveCanvas = liveCanvasRef.current;
     
-    // Set canvas size to match display size for proper coordinate mapping
+    // Initialize background canvas (white, locked, never cleared)
+    backgroundCanvas.width = CANVAS_SIZE;
+    backgroundCanvas.height = CANVAS_SIZE;
+    backgroundCtxRef.current = initBackgroundCanvas(backgroundCanvas);
+    
+    // Initialize drawing canvas (transparent, all drawing happens here)
     staticCanvas.width = CANVAS_SIZE;
     staticCanvas.height = CANVAS_SIZE;
+    staticCtxRef.current = initCanvas(staticCanvas);
+    
+    // Initialize live canvas (preview strokes)
     liveCanvas.width = CANVAS_SIZE;
     liveCanvas.height = CANVAS_SIZE;
-    
-    // Canvases are sized via CSS to 800x800, no need to set style dimensions
-    
-    staticCtxRef.current = initCanvas(staticCanvas);
-
-    
     const liveCtx = liveCanvas.getContext('2d')!;
     liveCtx.lineCap = 'round';
     liveCtx.lineJoin = 'round';
     liveCtxRef.current = liveCtx;
     
     liveCanvas.style.touchAction = 'none';
+
     
-    return () => {
-      if (rafIdRef.current) {
-        cancelAnimationFrame(rafIdRef.current);
+    // FIX: Add native touch event listeners with { passive: false } to allow preventDefault
+    const handleTouchStartNative = (e: TouchEvent) => {
+      e.preventDefault();
+      const touches = e.touches;
+      
+      if (!isDrawer) {
+        if (touches.length === 1) {
+          setIsPanning(true);
+          panStartRef.current = { x: touches[0].clientX, y: touches[0].clientY };
+        } else if (touches.length === 2) {
+          lastTouchDistanceRef.current = getTouchDistance(touches);
+        }
+        return;
+      }
+      
+      if (touches.length === 1) {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const pos = getPos({ clientX: touches[0].clientX, clientY: touches[0].clientY } as React.MouseEvent, containerRef, transformRef.current);
+        setIsDrawing(true);
+        shapeStartRef.current = pos;
+        currentStrokeRef.current = [{ x: pos.x, y: pos.y, pressure: 1 }];
+        currentStrokeIdRef.current = Date.now().toString();
+        syncedPointCountRef.current = 0;
+      } else if (touches.length === 2) {
+        setIsDrawing(false);
+        clearLiveCanvas();
+        currentStrokeRef.current = [];
+        lastTouchDistanceRef.current = getTouchDistance(touches);
       }
     };
-  }, []);
 
-
-  // Process pointer event - NO INTERPOLATION (handled by distance-based stamping)
-  const processPointerEvent = (e: PointerEvent) => {
-    if (!isDrawing) return;
-    
-    // @ts-ignore
-    const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-    
-    for (const ev of events) {
-      // Use transformRef to get latest transform state
-      const pos = getPosFromEvent(ev, containerRef, transformRef.current);
-
+    const handleTouchMoveNative = (e: TouchEvent) => {
+      e.preventDefault();
+      const touches = e.touches;
       
-      const isPen = ev.pointerType === 'pen';
-      let rawPressure: number;
-      
-      if (isPen) {
-        if (ev.pressure > 0) {
-          rawPressure = ev.pressure;
-        } else {
-          rawPressure = smoothedPressureRef.current > 0.1 
-            ? smoothedPressureRef.current 
-            : 0.5;
+      if (!isDrawer) {
+        if (touches.length === 1 && isPanning && panStartRef.current) {
+          const touch = touches[0];
+          const dx = touch.clientX - panStartRef.current.x;
+          const dy = touch.clientY - panStartRef.current.y;
+          setTransform(prev => ({
+            ...prev,
+            translateX: prev.translateX + dx * 0.5,
+            translateY: prev.translateY + dy * 0.5,
+          }));
+          panStartRef.current = { x: touch.clientX, y: touch.clientY };
+        } else if (touches.length === 2 && lastTouchDistanceRef.current) {
+          const currentDistance = getTouchDistance(touches);
+          const scaleFactor = currentDistance / lastTouchDistanceRef.current;
+          setTransform(prev => ({
+            ...prev,
+            scale: Math.max(0.01, Math.min(3, prev.scale * scaleFactor)),
+          }));
         }
-      } else {
-        rawPressure = 1;
+        return;
       }
       
-      const prevSmoothed = smoothedPressureRef.current;
-      const newSmoothed = prevSmoothed + (rawPressure - prevSmoothed) * PRESSURE_SMOOTHING;
-      smoothedPressureRef.current = newSmoothed;
-      currentPressureRef.current = newSmoothed;
+      if (touches.length === 1 && isDrawing) {
+        const pos = getPos({ clientX: touches[0].clientX, clientY: touches[0].clientY } as React.MouseEvent, containerRef, transformRef.current);
+        
+        currentStrokeRef.current.push({ x: pos.x, y: pos.y, pressure: 1 });
+        
+        if (activeTool === 'brush' || activeTool === 'eraser') {
+          renderLiveStroke();
+          syncStrokeChunk();
+        } else if (['rect', 'circle', 'line'].includes(activeTool)) {
+          clearLiveCanvas();
+          const endPos = currentStrokeRef.current[currentStrokeRef.current.length - 1];
+          drawPreviewShape(
+            liveCtxRef.current!,
+            shapeStartRef.current!,
+            endPos,
+            activeTool as 'rect' | 'circle' | 'line',
+            brushColor,
+            brushSize,
+            brushOpacity
+          );
+        }
+      }
+    };
+
+    const handleTouchEndNative = (e: TouchEvent) => {
+      const touches = e.touches;
       
-      const pressurePoint: PressurePoint = {
-        x: pos.x,
-        y: pos.y,
-        pressure: newSmoothed,
-        tiltX: (ev as any).tiltX,
-        tiltY: (ev as any).tiltY,
-      };
+      if (!isDrawer) {
+        if (touches.length === 0) {
+          setIsPanning(false);
+          panStartRef.current = null;
+          lastTouchDistanceRef.current = null;
+        }
+        return;
+      }
       
-      // NO INTERPOLATION - distance-based stamping handles gaps
-      currentStrokeRef.current.push(pressurePoint);
-    }
+      if (touches.length === 0) {
+        if (isDrawing && staticCtxRef.current && liveCtxRef.current && socket) {
+          setIsDrawing(false);
+          
+          let stroke: Stroke;
+          if (['rect', 'circle', 'line'].includes(activeTool)) {
+            const endPos = currentStrokeRef.current[currentStrokeRef.current.length - 1] || shapeStartRef.current!;
+            stroke = {
+              id: Date.now().toString(),
+              tool: 'shape',
+              shapeType: activeTool as 'rect' | 'circle' | 'line',
+              points: [],
+              startPoint: shapeStartRef.current!,
+              endPoint: { x: endPos.x, y: endPos.y },
+              color: brushColor,
+              size: brushSize,
+              opacity: brushOpacity,
+            };
+            drawShape(staticCtxRef.current, stroke);
+          } else {
+            stroke = {
+              id: Date.now().toString(),
+              tool: activeTool as ToolType,
+              points: currentStrokeRef.current.map(p => ({ x: p.x, y: p.y, pressure: p.pressure })),
+              color: brushColor,
+              size: brushSize,
+              opacity: brushOpacity,
+            };
+            drawStroke(staticCtxRef.current, stroke);
+          }
+          
+          canvasStateRef.current.strokes.push(stroke);
+          canvasStateRef.current.redoStack = [];
+          socket.emit('draw:stroke', { stroke });
+          
+          clearLiveCanvas();
+          currentStrokeRef.current = [];
+          shapeStartRef.current = null;
+        }
+      }
+    };
     
+    // Add native event listeners with { passive: false }
+    liveCanvas.addEventListener('touchstart', handleTouchStartNative, { passive: false });
+    liveCanvas.addEventListener('touchmove', handleTouchMoveNative, { passive: false });
+    liveCanvas.addEventListener('touchend', handleTouchEndNative, { passive: false });
+    
+    // Expose controls
+
+    (window as any).canvasControls = {
+      clear: clearCanvasInternal,
+      undo: undoInternal,
+      redo: redoInternal,
+      zoomIn: () => setTransform(prev => ({ ...prev, scale: Math.min(3, prev.scale * 1.2) })),
+      zoomOut: () => setTransform(prev => ({ ...prev, scale: Math.max(0.01, prev.scale / 1.2) })),
+      resetTransform: () => setTransform({ scale: isMobile ? 0.5 : 1.0, translateX: 0, translateY: 0, rotation: 0 }),
+      rotate: (dir: 'cw' | 'ccw') => setTransform(prev => ({ ...prev, rotation: prev.rotation + (dir === 'cw' ? 90 : -90) })),
+    };
+  }, [isMobile]);
+
+  // Clear live canvas
+  const clearLiveCanvas = useCallback(() => {
+    if (!liveCtxRef.current) return;
+    liveCtxRef.current.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+  }, []);
+
+  // Render live stroke
+  const renderLiveStroke = useCallback(() => {
+    if (!liveCtxRef.current || currentStrokeRef.current.length < 2) return;
+    
+    const ctx = liveCtxRef.current;
+    const points = currentStrokeRef.current;
+    
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    
+    const baseRadius = brushSize / 2;
+    const spacing = Math.max(1, baseRadius * 0.1);
+    
+    let lastPoint = points[0];
+    
+    for (let i = 1; i < points.length; i++) {
+      const p = points[i];
+      const dx = p.x - lastPoint.x;
+      const dy = p.y - lastPoint.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      
+      if (dist < spacing) continue;
+      
+      const pressure = p.pressure || 1;
+      const radius = baseRadius * (0.2 + pressure * 0.8);
+      const alpha = brushOpacity * pressure;
+      
+      // FIX: Use destination-out for eraser to actually erase pixels
+      if (activeTool === 'eraser') {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = brushColor;
+        ctx.globalAlpha = alpha;
+      }
+      
+      // Draw circle at point
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Interpolate if gap is large
+      if (dist > spacing * 2) {
+        const steps = Math.floor(dist / spacing);
+        for (let j = 1; j < steps; j++) {
+          const t = j / steps;
+          const ix = lastPoint.x + dx * t;
+          const iy = lastPoint.y + dy * t;
+          ctx.beginPath();
+          ctx.arc(ix, iy, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      
+      lastPoint = p;
+    }
+  }, [activeTool, brushColor, brushSize, brushOpacity]);
+
+
+  // Sync stroke chunk to server
+  const syncStrokeChunk = useCallback(() => {
+    if (!socket || !isDrawing) return;
+    
+    const now = Date.now();
+    if (now - lastSyncTimeRef.current < SYNC_INTERVAL_MS) return;
+    lastSyncTimeRef.current = now;
+    
+    const points = currentStrokeRef.current;
+    const lastSynced = syncedPointCountRef.current;
+    
+    if (points.length > lastSynced + 2) {
+      const chunk = points.slice(lastSynced);
+      syncedPointCountRef.current = points.length;
+      
+      socket.emit('draw:stroke:chunk', {
+        strokeId: currentStrokeIdRef.current,
+        points: chunk.map(p => ({ x: p.x, y: p.y, pressure: p.pressure })),
+        tool: activeTool,
+        color: brushColor,
+        size: brushSize,
+      });
+    }
+  }, [socket, isDrawing, activeTool, brushColor, brushSize]);
+
+  // Process pointer event
+  const processPointerEvent = useCallback((e: PointerEvent) => {
+    if (!isDrawing || !isDrawer) return;
+    
+    const pos = getPosFromEvent(e, containerRef, transformRef.current);
+    const isPen = e.pointerType === 'pen';
+    let rawPressure = isPen ? (e.pressure > 0 ? e.pressure : 0.5) : 1;
+    
+    // Smooth pressure
+    const prevSmoothed = smoothedPressureRef.current;
+    const newSmoothed = prevSmoothed + (rawPressure - prevSmoothed) * 0.35;
+    smoothedPressureRef.current = newSmoothed;
+    
+    const pressurePoint: PressurePoint = {
+      x: pos.x,
+      y: pos.y,
+      pressure: newSmoothed,
+      tiltX: (e as any).tiltX,
+      tiltY: (e as any).tiltY,
+    };
+    
+    currentStrokeRef.current.push(pressurePoint);
+    
+    // Render to live canvas
     if (activeTool === 'brush' || activeTool === 'eraser') {
-      scheduleRender();
+      renderLiveStroke();
     } else if (['rect', 'circle', 'line'].includes(activeTool)) {
       if (liveCtxRef.current) {
         clearLiveCanvas();
@@ -243,44 +423,25 @@ export default function DrawingCanvas({
         );
       }
     }
-  };
+    
+    // Sync to other players
+    syncStrokeChunk();
+  }, [isDrawing, isDrawer, activeTool, brushColor, brushSize, brushOpacity, renderLiveStroke, clearLiveCanvas, syncStrokeChunk]);
 
-  // Separate effect for pointerrawupdate listener
+  // Pointer raw update
   useEffect(() => {
-    if (!liveCanvasRef.current) return;
+    if (!liveCanvasRef.current || !isDrawing) return;
     
     const liveCanvas = liveCanvasRef.current;
-    
-    const handleRawUpdate = (e: PointerEvent) => {
-      if (!isDrawing) return;
-      processPointerEvent(e);
-    };
+    const handleRawUpdate = (e: PointerEvent) => processPointerEvent(e);
     
     // @ts-ignore
     liveCanvas.addEventListener('pointerrawupdate', handleRawUpdate);
-    
     return () => {
       // @ts-ignore
       liveCanvas.removeEventListener('pointerrawupdate', handleRawUpdate);
     };
-  }, [isDrawing]);
-
-
-  // Handle resize - update display size for coordinate calculations
-  useEffect(() => {
-    const updateSize = () => {
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      // Use the actual container dimensions, not min dimension
-      // This ensures the canvas fills the available space
-      setDisplaySize({ width: rect.width, height: rect.height });
-    };
-
-    updateSize();
-    window.addEventListener('resize', updateSize);
-    return () => window.removeEventListener('resize', updateSize);
-  }, []);
-
+  }, [isDrawing, processPointerEvent]);
 
   // Socket events
   useEffect(() => {
@@ -288,128 +449,126 @@ export default function DrawingCanvas({
 
     socket.on('draw:stroke', (data: { playerId: string; stroke: Stroke }) => {
       if (data.playerId === socket.id) return;
-      strokesRef.current.push(data.stroke);
+      canvasStateRef.current.strokes.push(data.stroke);
       drawStroke(staticCtxRef.current!, data.stroke);
     });
 
-    socket.on('draw:clear', () => {
-      strokesRef.current = [];
-      redoStackRef.current = [];
-      redrawAllStrokes(staticCtxRef.current!, []);
-      clearLiveCanvas();
+    socket.on('draw:stroke:chunk', (data: { playerId: string; points: Point[]; tool: ToolType; color: string; size: number }) => {
+      if (data.playerId === socket.id) return;
+      if (liveCtxRef.current) {
+        renderChunkToCanvas(liveCtxRef.current, data.points, data.tool, data.color, data.size);
+      }
     });
 
-    // Listen for CLEAR_CANVAS event from server (when new drawer starts)
-    socket.on('CLEAR_CANVAS', () => {
-      console.log('[DrawingCanvas] CLEAR_CANVAS received - clearing canvas for new drawer');
-      strokesRef.current = [];
-      redoStackRef.current = [];
-      redrawAllStrokes(staticCtxRef.current!, []);
-      clearLiveCanvas();
+    socket.on('draw:clear', () => clearCanvasInternal(false));
+    
+    socket.on('game:round:end', () => {
+      clearCanvasInternal(false);
+      canvasStateRef.current = { strokes: [], redoStack: [] };
     });
 
-    socket.on('draw:undo', () => undoInternal());
-    socket.on('draw:redo', () => redoInternal());
+    socket.on('draw:undo', () => undoInternal(false));
+    socket.on('draw:redo', () => redoInternal(false));
 
-    // Canvas sync for rejoining players - receive current canvas state
     socket.on('canvas:sync', (data: { strokes: Stroke[] }) => {
-      console.log('[DrawingCanvas] canvas:sync received - restoring', data.strokes?.length || 0, 'strokes');
-      if (data.strokes && data.strokes.length > 0) {
-        strokesRef.current = data.strokes;
-        redoStackRef.current = [];
+      if (data.strokes?.length > 0) {
+        canvasStateRef.current.strokes = data.strokes;
+        canvasStateRef.current.redoStack = [];
         redrawAllStrokes(staticCtxRef.current!, data.strokes);
       }
     });
 
     return () => {
       socket.off('draw:stroke');
+      socket.off('draw:stroke:chunk');
       socket.off('draw:clear');
-      socket.off('CLEAR_CANVAS');
+      socket.off('game:round:end');
       socket.off('draw:undo');
       socket.off('draw:redo');
       socket.off('canvas:sync');
     };
-
   }, [socket]);
 
+  // Render chunk from other players
+  const renderChunkToCanvas = (ctx: CanvasRenderingContext2D, points: Point[], tool: ToolType, color: string, size: number) => {
+    if (points.length < 2) return;
+    
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    
+    const baseRadius = size / 2;
+    
+    for (let i = 1; i < points.length; i++) {
+      const p = points[i];
+      const prev = points[i - 1];
+      const pressure = (p as any).pressure || 1;
+      const radius = baseRadius * (0.2 + pressure * 0.8);
+      
+      // FIX: Use destination-out for eraser to actually erase pixels
+      if (tool === 'eraser') {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 1;
+      }
+      
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Interpolate
+      const dx = p.x - prev.x;
+      const dy = p.y - prev.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const spacing = radius * 0.5;
+      
+      if (dist > spacing) {
+        const steps = Math.floor(dist / spacing);
+        for (let j = 1; j < steps; j++) {
+          const t = j / steps;
+          const ix = prev.x + dx * t;
+          const iy = prev.y + dy * t;
+          ctx.beginPath();
+          ctx.arc(ix, iy, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  };
 
-  // Keyboard shortcuts - Photoshop style
+
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Track pressed keys
       keysPressedRef.current.add(e.key.toLowerCase());
-      const keys = keysPressedRef.current;
       
-      // Don't trigger shortcuts when typing in inputs
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
       // Tool shortcuts
       switch (e.key.toLowerCase()) {
-        case 'b': // Brush
-          e.preventDefault();
-          onToolChange?.('brush');
-          return;
-        case 'e': // Eraser
-          e.preventDefault();
-          onToolChange?.('eraser');
-          return;
-        case 'm': // Marquee/Rectangle
-          e.preventDefault();
-          onToolChange?.('rect');
-          return;
-        case 'l': // Lasso/Circle
-          e.preventDefault();
-          onToolChange?.('circle');
-          return;
-        case 't': // Type/Text
-          e.preventDefault();
-          onToolChange?.('text');
-          return;
-        case 'g': // Paint Bucket/Fill
-          e.preventDefault();
-          onToolChange?.('fill');
-          return;
-        case 'v': // Move/Pan mode
-          e.preventDefault();
-          // Space is already handled in pointer events
-          return;
+        case 'b': e.preventDefault(); onToolChange?.('brush'); return;
+        case 'e': e.preventDefault(); onToolChange?.('eraser'); return;
+        case 'm': e.preventDefault(); onToolChange?.('rect'); return;
+        case 'l': e.preventDefault(); onToolChange?.('circle'); return;
+        case 't': e.preventDefault(); onToolChange?.('text'); return;
+        case 'g': e.preventDefault(); onToolChange?.('fill'); return;
       }
 
-      // Brush size shortcuts [ and ]
+      // Brush size
       if (e.key === '[') {
         e.preventDefault();
-        if (e.shiftKey) {
-          // Shift + [ = decrease opacity
-          onBrushOpacityChange?.(Math.max(1, brushOpacity - 10));
-        } else {
-          // [ = decrease brush size
-          onBrushSizeChange?.(Math.max(1, brushSize - 2));
-        }
+        onBrushSizeChange?.(Math.max(1, brushSize - 2));
         return;
       }
       if (e.key === ']') {
         e.preventDefault();
-        if (e.shiftKey) {
-          // Shift + ] = increase opacity
-          onBrushOpacityChange?.(Math.min(100, brushOpacity + 10));
-        } else {
-          // ] = increase brush size
-          onBrushSizeChange?.(Math.min(100, brushSize + 2));
-        }
+        onBrushSizeChange?.(Math.min(100, brushSize + 2));
         return;
       }
 
-      // Opacity shortcuts 0-9
-      if (e.key >= '0' && e.key <= '9') {
-        e.preventDefault();
-        const opacity = e.key === '0' ? 100 : parseInt(e.key) * 10;
-        onBrushOpacityChange?.(opacity);
-        return;
-      }
-
-      // X - Swap foreground/background (toggle black/white)
+      // Swap colors
       if (e.key.toLowerCase() === 'x') {
         e.preventDefault();
         const newColor = brushColor === '#000000' ? '#ffffff' : '#000000';
@@ -417,53 +576,24 @@ export default function DrawingCanvas({
         return;
       }
 
-      // View shortcuts with Ctrl/Cmd
+      // Ctrl/Cmd
       if (e.ctrlKey || e.metaKey) {
         switch (e.key.toLowerCase()) {
-          case 'z':
-            e.preventDefault();
-            if (e.shiftKey) {
-              redo();
-            } else {
-              undo();
-            }
-            return;
-          case 'y':
-            e.preventDefault();
-            redo();
-            return;
-          case '=':
-          case '+':
-            e.preventDefault();
-            zoomIn();
-            return;
-          case '-':
-            e.preventDefault();
-            zoomOut();
-            return;
-          case '0':
-            e.preventDefault();
-            resetTransform();
-            return;
-          case '[':
-            e.preventDefault();
-            rotate('ccw');
-            return;
-          case ']':
-            e.preventDefault();
-            rotate('cw');
-            return;
+          case 'z': e.preventDefault(); e.shiftKey ? redo() : undo(); return;
+          case 'y': e.preventDefault(); redo(); return;
+          case '=': case '+': e.preventDefault(); zoomIn(); return;
+          case '-': e.preventDefault(); zoomOut(); return;
+          case '0': e.preventDefault(); resetTransform(); return;
         }
       }
 
-      // Delete/Backspace - Clear canvas
+      // Delete
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
-        if (confirm('Clear the canvas?')) {
-          clearCanvas();
-        }
+        if (confirm('Clear the canvas?')) handleClearCanvas();
         return;
       }
+
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -472,575 +602,184 @@ export default function DrawingCanvas({
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
-
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [brushColor, brushSize, brushOpacity, onToolChange, onBrushSizeChange, onBrushColorChange, onBrushOpacityChange]);
+  }, [brushColor, brushSize, onToolChange, onBrushSizeChange, onBrushColorChange]);
 
-  // Clear live canvas helper
-  const clearLiveCanvas = useCallback(() => {
-    if (!liveCtxRef.current || !liveCanvasRef.current) return;
-    liveCtxRef.current.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-  }, []);
-
-  // Render stroke immediately to live canvas - only render NEW points since last render
-  const renderStrokeImmediate = useCallback((ctx: CanvasRenderingContext2D, points: PressurePoint[]) => {
-    if (points.length < 2) return;
-
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
-    const baseRadius = brushSize / 2;
-    const minSpacing = brushSettings.minSpacing;
-    const spacingMult = brushSettings.spacingMultiplier;
-    const interpThreshold = brushSettings.interpolationThreshold;
-
-    // Get the starting point - either from last rendered position or first point
-    let lastStamp: PressurePoint;
-    let startIndex: number;
+  // Internal functions
+  const clearCanvasInternal = useCallback((emit: boolean = true) => {
+    if (!staticCtxRef.current) return;
     
-    if (lastRenderedIndexRef.current > 0 && lastRenderedIndexRef.current < points.length) {
-      // Continue from where we left off
-      lastStamp = points[lastRenderedIndexRef.current];
-      startIndex = lastRenderedIndexRef.current + 1;
-    } else {
-      // Start fresh
-      lastStamp = points[0];
-      startIndex = 1;
+    // Save current strokes to redo stack before clearing (for undo support)
+    const { strokes } = canvasStateRef.current;
+    if (strokes.length > 0) {
+      // Store a snapshot of all strokes for undo
+      canvasStateRef.current.redoStack = [{
+        id: 'clear-snapshot-' + Date.now(),
+        tool: 'clear',
+        points: [],
+        color: '',
+        size: 0,
+        opacity: 1,
+        // Store all strokes that were cleared
+        clearedStrokes: [...strokes]
+      }];
     }
+    
+    clearCanvas(staticCtxRef.current);
+    clearLiveCanvas();
+    canvasStateRef.current.strokes = [];
+    
+    if (emit) {
+      socket?.emit('draw:clear');
+      onClear?.();
+    }
+  }, [socket, onClear, clearLiveCanvas]);
 
-    for (let i = startIndex; i < points.length; i++) {
-      const p = points[i];
 
-      const dx = p.x - lastStamp.x;
-      const dy = p.y - lastStamp.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
 
-      const mappedPressure = applyPressureCurve(p.pressure, false);
-
-      const stampRadius = baseRadius * mappedPressure;
-
-      // spacing based on settings
-      const spacing = Math.max(minSpacing, stampRadius * spacingMult);
-
-      if (dist < spacing) continue;
-
-      // Interpolation based on settings threshold
-      if (dist > spacing * interpThreshold) {
-        const steps = Math.floor(dist / spacing);
-        for (let j = 1; j <= steps; j++) {
-          const t = j / steps;
-          const interpX = lastStamp.x + dx * t;
-          const interpY = lastStamp.y + dy * t;
-          const interpPressure = lastStamp.pressure + (p.pressure - lastStamp.pressure) * t;
-          const interpMappedPressure = applyPressureCurve(interpPressure, false);
-
-          const interpStampRadius = baseRadius * interpMappedPressure;
-          const interpOpacity = brushOpacity * interpMappedPressure;
-
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.fillStyle = activeTool === 'eraser' ? '#f8fafc' : brushColor;
-          ctx.globalAlpha = activeTool === 'eraser' ? 1 : interpOpacity;
-
-          ctx.beginPath();
-          ctx.arc(interpX, interpY, interpStampRadius, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      } else {
-        // Single stamp for small gaps
-        const opacity = brushOpacity * mappedPressure;
-
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = activeTool === 'eraser' ? '#f8fafc' : brushColor;
-        ctx.globalAlpha = activeTool === 'eraser' ? 1 : opacity;
-
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, stampRadius, 0, Math.PI * 2);
-        ctx.fill();
+  const undoInternal = useCallback((emit: boolean = true) => {
+    const { strokes, redoStack } = canvasStateRef.current;
+    
+    // Check if there's a clear snapshot to restore
+    const clearSnapshot = redoStack.find(s => s.tool === 'clear' && s.clearedStrokes);
+    if (clearSnapshot && clearSnapshot.clearedStrokes) {
+      // Restore all cleared strokes
+      canvasStateRef.current.strokes = [...clearSnapshot.clearedStrokes];
+      canvasStateRef.current.redoStack = [];
+      redrawAllStrokes(staticCtxRef.current!, canvasStateRef.current.strokes);
+      clearLiveCanvas();
+      
+      if (emit) {
+        socket?.emit('draw:undo');
+        onUndo?.();
       }
-
-      lastStamp = p;
-    }
-
-    // Update the last rendered index
-    lastRenderedIndexRef.current = points.length - 1;
-  }, [activeTool, brushColor, brushSize, brushOpacity, brushSettings]);
-
-  // Schedule render using RAF or immediate based on settings
-  const scheduleRender = useCallback(() => {
-    const ctx = liveCtxRef.current;
-    const points = currentStrokeRef.current;
-    if (!ctx || points.length < 2) return;
-
-    // If live preview enabled, render immediately for instant feedback
-    if (brushSettings.showLivePreview) {
-      renderStrokeImmediate(ctx, points);
       return;
     }
-
-    // Otherwise use RAF for batching
-    if (needsRenderRef.current) return;
-
-    needsRenderRef.current = true;
-    rafIdRef.current = requestAnimationFrame(() => {
-      needsRenderRef.current = false;
-      renderStrokeImmediate(ctx, points);
-    });
-  }, [brushSettings.showLivePreview, renderStrokeImmediate]);
-
-  // Throttled live stroke sync to server
-  const lastSyncTimeRef = useRef<number>(0);
-  const syncThrottleMs = 50; // Sync every 50ms max
-  
-  const syncStrokeLive = useCallback(() => {
-    if (!socket || !isDrawing) return;
     
-    const now = Date.now();
-    if (now - lastSyncTimeRef.current < syncThrottleMs) return;
-    lastSyncTimeRef.current = now;
+    if (strokes.length === 0) return;
     
-    // Send current stroke points to server for live preview
-    if (currentStrokeRef.current.length > 1) {
-      const liveStroke: Stroke = {
-        id: 'live-' + Date.now(),
-        tool: activeTool as ToolType,
-        points: currentStrokeRef.current.slice(-10).map(p => ({ x: p.x, y: p.y, pressure: p.pressure })), // Send last 10 points
-        color: brushColor,
-        size: brushSize,
-        opacity: brushOpacity,
-        isLive: true, // Flag as live stroke
-      };
-      socket.emit('draw:stroke:live', { stroke: liveStroke });
+    const removed = strokes.pop()!;
+    redoStack.push(removed);
+    redrawAllStrokes(staticCtxRef.current!, strokes);
+    clearLiveCanvas();
+    
+    if (emit) {
+      socket?.emit('draw:undo');
+      onUndo?.();
     }
-  }, [socket, isDrawing, activeTool, brushColor, brushSize, brushOpacity]);
+  }, [socket, onUndo, clearLiveCanvas]);
 
-  // Apply tapering at the end of stroke - gradually reduce pressure to 0
-  const applyTapering = (points: PressurePoint[]): PressurePoint[] => {
-    if (points.length < 3) return points;
-    
-    const TAPER_LENGTH = 15; // Number of points to taper
-    const startTaperIdx = Math.max(0, points.length - TAPER_LENGTH);
-    
-    return points.map((p, i) => {
-      if (i < startTaperIdx) {
-        return p; // No change for points before taper zone
-      }
-      
-      // Calculate taper factor: 1.0 at start of taper zone, 0.0 at end
-      const taperProgress = (i - startTaperIdx) / TAPER_LENGTH;
-      const taperFactor = 1 - Math.pow(taperProgress, 0.5); // Ease out curve
-      
-      return {
-        ...p,
-        pressure: p.pressure * taperFactor,
-      };
-    });
-  };
 
-  // Helper to reduce point count for storage
-  const samplePointsForStorage = (points: PressurePoint[]): Point[] => {
-    if (points.length <= 30) {
-      return points.map(p => ({ x: p.x, y: p.y, pressure: p.pressure }));
+  const redoInternal = useCallback((emit: boolean = true) => {
+    const { strokes, redoStack } = canvasStateRef.current;
+    if (redoStack.length === 0) return;
+    
+    const stroke = redoStack.pop()!;
+    strokes.push(stroke);
+    drawStroke(staticCtxRef.current!, stroke);
+    
+    if (emit) {
+      socket?.emit('draw:redo');
+      onRedo?.();
     }
-    
-    const sampled: Point[] = [points[0]];
-    let lastSampledIdx = 0;
-    
-    for (let i = 1; i < points.length - 1; i++) {
-      const p = points[i];
-      const lastSampled = points[lastSampledIdx];
-      const dx = p.x - lastSampled.x;
-      const dy = p.y - lastSampled.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      
-      const pressureDiff = Math.abs(p.pressure - lastSampled.pressure);
-      const hasPressureChange = pressureDiff > 0.15;
-      
-      const avgPressure = (p.pressure + lastSampled.pressure) / 2;
-      const adaptiveSpacing = Math.max(1.5, brushSize * 0.08 * (0.5 + avgPressure));
-      
-      if (distance >= adaptiveSpacing || hasPressureChange) {
-        sampled.push({ x: p.x, y: p.y, pressure: p.pressure });
-        lastSampledIdx = i;
-      }
-    }
-    
-    const last = points[points.length - 1];
-    const lastSampled = points[lastSampledIdx];
-    if (last.x !== lastSampled.x || last.y !== lastSampled.y) {
-      sampled.push({ x: last.x, y: last.y, pressure: last.pressure });
-    }
-    
-    return sampled;
-  };
+  }, [socket, onRedo]);
 
-  // Window mouse events for drawing outside canvas
-
-  useEffect(() => {
-    if (!isDrawing || !isDrawer) return; // Block non-drawers from drawing
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!liveCtxRef.current) return;
-      // Use transformRef to get latest transform state
-      const pos = getPosFromEvent(e, containerRef, transformRef.current);
-
-      
-      const pointerEvent = e as unknown as PointerEvent;
-      const pressure = pointerEvent.pressure !== undefined && pointerEvent.pressure > 0 
-        ? pointerEvent.pressure 
-        : 1;
-      
-      const pressurePoint: PressurePoint = {
-        x: pos.x,
-        y: pos.y,
-        pressure: pressure,
-      };
-      
-      currentStrokeRef.current.push(pressurePoint);
-      
-      // Render immediately for live feedback
-      if (brushSettings.showLivePreview) {
-        renderStrokeImmediate(liveCtxRef.current, currentStrokeRef.current);
-      } else {
-        scheduleRender();
-      }
-      
-      // Sync live stroke to other players
-      syncStrokeLive();
-    };
+  // Public functions
+  const handleClearCanvas = useCallback(() => {
+    if (!isDrawer) return;
+    clearCanvasInternal(true);
+  }, [isDrawer, clearCanvasInternal]);
 
 
-    const handleMouseUp = () => {
-      // End drawing - save stroke before clearing
-      if (!isDrawing) return;
-      
-      // Save the stroke if we have points (same logic as handlePointerUp)
-      if (currentStrokeRef.current.length > 0 && staticCtxRef.current && liveCtxRef.current && socket) {
-        let stroke: Stroke;
-        if (['rect', 'circle', 'line'].includes(activeTool)) {
-          const endPos = currentStrokeRef.current[currentStrokeRef.current.length - 1] || { x: 0, y: 0, pressure: 1 };
-          stroke = {
-            id: Date.now().toString(),
-            tool: 'shape',
-            shapeType: activeTool as 'rect' | 'circle' | 'line',
-            points: [],
-            startPoint: shapeStartRef.current!,
-            endPoint: { x: endPos.x, y: endPos.y },
-            color: brushColor,
-            size: brushSize,
-            opacity: brushOpacity,
-          };
-          drawShape(staticCtxRef.current, stroke);
-        } else if (activeTool === 'brush' || activeTool === 'eraser') {
-          // Apply tapering at the end of stroke
-          const points = currentStrokeRef.current;
-          const taperedPoints = applyTapering(points);
-          
-          stroke = {
-            id: Date.now().toString(),
-            tool: activeTool as ToolType,
-            points: samplePointsForStorage(taperedPoints),
-            color: brushColor,
-            size: brushSize,
-            opacity: brushOpacity,
-            pressureData: taperedPoints.map(p => p.pressure),
-          };
+  const undo = useCallback(() => {
+    if (!isDrawer) return;
+    undoInternal(true);
+  }, [isDrawer, undoInternal]);
 
-          drawStroke(staticCtxRef.current, stroke);
-        }
+  const redo = useCallback(() => {
+    if (!isDrawer) return;
+    redoInternal(true);
+  }, [isDrawer, redoInternal]);
 
-        // Only save and emit if we created a stroke
-        if (stroke!) {
-          strokesRef.current.push(stroke);
-          redoStackRef.current = [];
-          socket.emit('draw:stroke', { stroke });
-        }
-      }
+  const zoomIn = useCallback(() => {
+    setTransform(prev => ({ ...prev, scale: Math.min(3, prev.scale * 1.2) }));
+  }, []);
 
-      setIsDrawing(false);
-      clearLiveCanvas();
-      currentStrokeRef.current = [];
-      lastRenderedIndexRef.current = 0;
-      shapeStartRef.current = null;
-      isPenActiveRef.current = false;
-      currentPressureRef.current = 1;
-      smoothedPressureRef.current = 1;
-    };
+  const zoomOut = useCallback(() => {
+    setTransform(prev => ({ ...prev, scale: Math.max(0.01, prev.scale / 1.2) }));
+  }, []);
 
+  const resetTransform = useCallback(() => {
+    setTransform({ scale: isMobile ? 0.5 : 1.0, translateX: 0, translateY: 0, rotation: 0 });
+  }, [isMobile]);
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-
-  }, [isDrawing, isDrawer, activeTool, brushSize, brushColor, brushOpacity, transform, scheduleRender, brushSettings.showLivePreview, renderStrokeImmediate, syncStrokeLive]);
-
-
-
-  // Touch gesture state for mobile
-  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
-  const touchStartDistanceRef = useRef<number | null>(null);
-  const touchStartTransformRef = useRef<Transform | null>(null);
-  const touchStartCenterRef = useRef<{ x: number; y: number } | null>(null);
-  const isTouchDrawingRef = useRef(false);
-  const activeTouchesRef = useRef<Map<number, { x: number; y: number }>>(new Map());
-
-  // Global window events for panning, zooming, and brush sizing
-  useEffect(() => {
-    if (!isPanning && !isZooming && !isBrushSizing) return;
-
-    const handleMove = (e: MouseEvent) => {
-      if (isPanning && panStartRef.current) {
-        const dx = e.clientX - panStartRef.current.x;
-        const dy = e.clientY - panStartRef.current.y;
-        setTransform((prev) => ({
-          ...prev,
-          translateX: prev.translateX + dx * 0.5,
-          translateY: prev.translateY + dy * 0.5,
-        }));
-        panStartRef.current = { x: e.clientX, y: e.clientY };
-      } else if (isZooming && zoomStartRef.current) {
-        // Scrubby zoom: drag left/right to zoom in/out
-        const dx = e.clientX - zoomStartRef.current.x;
-        const zoomFactor = Math.exp(dx * 0.01);
-        const newScale = Math.max(0.1, Math.min(5, zoomStartRef.current.initialScale * zoomFactor));
-        setTransform((prev) => ({
-          ...prev,
-          scale: newScale,
-        }));
-      } else if (isBrushSizing && brushSizeStartRef.current && onBrushSizeChange) {
-        // HUD brush sizing: drag left/right to decrease/increase size
-        const dx = e.clientX - brushSizeStartRef.current.x;
-        const newSize = Math.max(1, Math.min(100, brushSizeStartRef.current.initialSize + dx * 0.5));
-        onBrushSizeChange(Math.round(newSize));
-      }
-    };
-
-    const handleEnd = () => {
-      setIsPanning(false);
-      setIsZooming(false);
-      setIsBrushSizing(false);
-      panStartRef.current = null;
-      zoomStartRef.current = null;
-      brushSizeStartRef.current = null;
-    };
-
-    document.addEventListener('pointermove', handleMove);
-    document.addEventListener('pointerup', handleEnd);
-    document.addEventListener('pointercancel', handleEnd);
-    document.addEventListener('pointerleave', handleEnd);
-    window.addEventListener('blur', handleEnd);
-
-    return () => {
-      document.removeEventListener('pointermove', handleMove);
-      document.removeEventListener('pointerup', handleEnd);
-      document.removeEventListener('pointercancel', handleEnd);
-      document.removeEventListener('pointerleave', handleEnd);
-      window.removeEventListener('blur', handleEnd);
-    };
-
-
-
-
-  }, [isPanning, isZooming, isBrushSizing, onBrushSizeChange]);
-
-  // Mobile touch handlers for pinch-zoom and pan
+  // Touch handlers
   const handleTouchStart = (e: React.TouchEvent) => {
     const touches = e.touches;
     
-    // Non-drawers can only pan with single touch or pinch zoom with two fingers
     if (!isDrawer) {
       if (touches.length === 1) {
-        // Single touch - start panning for non-drawers
-        const touch = touches[0];
-        touchStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
-        setGestureState('panning');
         setIsPanning(true);
-        panStartRef.current = { x: touch.clientX, y: touch.clientY };
+        panStartRef.current = { x: touches[0].clientX, y: touches[0].clientY };
       } else if (touches.length === 2) {
-        // Two finger pinch zoom for non-drawers
-        setGestureState('multi-touch');
-        touchStartDistanceRef.current = getTouchDistance(touches);
-        touchStartTransformRef.current = { ...transformRef.current };
-        touchStartCenterRef.current = {
-          x: (touches[0].clientX + touches[1].clientX) / 2,
-          y: (touches[0].clientY + touches[1].clientY) / 2
-        };
+        lastTouchDistanceRef.current = getTouchDistance(touches);
       }
       return;
     }
     
-    // Track all active touches
-    activeTouchesRef.current.clear();
-    for (let i = 0; i < touches.length; i++) {
-      activeTouchesRef.current.set(touches[i].identifier, {
-        x: touches[i].clientX,
-        y: touches[i].clientY
-      });
-    }
-    
     if (touches.length === 1) {
-
-      // Single touch - check if we should start drawing
-      // Only draw if not currently in a multi-touch gesture
-      if (gestureState === 'idle' || gestureState === 'drawing') {
-        const touch = touches[0];
-        touchStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
-        isTouchDrawingRef.current = true;
-        setGestureState('drawing');
-        
-        // Start drawing
-        const pos = getPos(e as unknown as React.MouseEvent, containerRef, transformRef.current);
-        setIsDrawing(true);
-        shapeStartRef.current = pos;
-        currentStrokeRef.current = [{ 
-          x: pos.x, 
-          y: pos.y, 
-          pressure: 1,
-        }];
-      }
+      const pos = getPos(e as unknown as React.MouseEvent, containerRef, transformRef.current);
+      setIsDrawing(true);
+      shapeStartRef.current = pos;
+      currentStrokeRef.current = [{ x: pos.x, y: pos.y, pressure: 1 }];
+      currentStrokeIdRef.current = Date.now().toString();
+      syncedPointCountRef.current = 0;
     } else if (touches.length === 2) {
-      // Two finger touch - start pinch zoom/pan gesture
-      // Cancel any ongoing drawing
-      if (isDrawing) {
-        setIsDrawing(false);
-        isTouchDrawingRef.current = false;
-        clearLiveCanvas();
-        currentStrokeRef.current = [];
-        lastRenderedIndexRef.current = 0;
-        shapeStartRef.current = null;
-      }
-      
-      setGestureState('multi-touch');
-      isTouchDrawingRef.current = false;
-      touchStartDistanceRef.current = getTouchDistance(touches);
-      touchStartTransformRef.current = { ...transformRef.current };
-      
-      // Calculate center point of the two touches for panning
-      touchStartCenterRef.current = {
-        x: (touches[0].clientX + touches[1].clientX) / 2,
-        y: (touches[0].clientY + touches[1].clientY) / 2
-      };
-    } else if (touches.length > 2) {
-      // 3+ fingers - ignore
-      setGestureState('multi-touch');
-      isTouchDrawingRef.current = false;
+      setIsDrawing(false);
+      clearLiveCanvas();
+      currentStrokeRef.current = [];
+      lastTouchDistanceRef.current = getTouchDistance(touches);
     }
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    e.preventDefault(); // Prevent scrolling
-    
+    e.preventDefault();
     const touches = e.touches;
     
-    // Handle non-drawer touch interactions (pan and zoom only)
     if (!isDrawer) {
-      if (touches.length === 1 && isPanning && gestureState === 'panning') {
-        // Single touch panning for non-drawers
+      if (touches.length === 1 && isPanning && panStartRef.current) {
         const touch = touches[0];
-        if (panStartRef.current) {
-          const dx = touch.clientX - panStartRef.current.x;
-          const dy = touch.clientY - panStartRef.current.y;
-          setTransform((prev) => ({
-            ...prev,
-            translateX: prev.translateX + dx * 0.5,
-            translateY: prev.translateY + dy * 0.5,
-          }));
-          panStartRef.current = { x: touch.clientX, y: touch.clientY };
-        }
-        return;
-      } else if (touches.length === 2 && touchStartDistanceRef.current && touchStartTransformRef.current) {
-        // Two finger pinch zoom for non-drawers
+        const dx = touch.clientX - panStartRef.current.x;
+        const dy = touch.clientY - panStartRef.current.y;
+        setTransform(prev => ({
+          ...prev,
+          translateX: prev.translateX + dx * 0.5,
+          translateY: prev.translateY + dy * 0.5,
+        }));
+        panStartRef.current = { x: touch.clientX, y: touch.clientY };
+      } else if (touches.length === 2 && lastTouchDistanceRef.current) {
         const currentDistance = getTouchDistance(touches);
-        const scaleFactor = currentDistance / touchStartDistanceRef.current;
-        
-        const currentCenterX = (touches[0].clientX + touches[1].clientX) / 2;
-        const currentCenterY = (touches[0].clientY + touches[1].clientY) / 2;
-        
-        const startTransform = touchStartTransformRef.current;
-        const newScale = Math.max(0.25, Math.min(4, startTransform.scale * scaleFactor));
-        
-        const viewportRect = containerRef.current?.getBoundingClientRect();
-        if (viewportRect && touchStartCenterRef.current) {
-          const viewportCenterX = viewportRect.left + viewportRect.width / 2;
-          const viewportCenterY = viewportRect.top + viewportRect.height / 2;
-          
-          const panDeltaX = currentCenterX - touchStartCenterRef.current.x;
-          const panDeltaY = currentCenterY - touchStartCenterRef.current.y;
-          
-          const scaleRatio = newScale / startTransform.scale;
-          const zoomAdjustX = (touchStartCenterRef.current.x - viewportCenterX - startTransform.translateX) * (scaleRatio - 1);
-          const zoomAdjustY = (touchStartCenterRef.current.y - viewportCenterY - startTransform.translateY) * (scaleRatio - 1);
-          
-          setTransform({
-            ...startTransform,
-            scale: newScale,
-            translateX: startTransform.translateX + panDeltaX + zoomAdjustX,
-            translateY: startTransform.translateY + panDeltaY + zoomAdjustY,
-          });
-        } else {
-          setTransform({
-            ...startTransform,
-            scale: newScale,
-          });
-        }
-        return;
+        const scaleFactor = currentDistance / lastTouchDistanceRef.current;
+        setTransform(prev => ({
+          ...prev,
+          scale: Math.max(0.01, Math.min(3, prev.scale * scaleFactor)),
+        }));
       }
       return;
     }
     
-    // Update tracked touches
-    for (let i = 0; i < touches.length; i++) {
-      activeTouchesRef.current.set(touches[i].identifier, {
-        x: touches[i].clientX,
-        y: touches[i].clientY
-      });
-    }
-    
-    // If we have 2+ fingers, ensure we're in multi-touch mode and NOT drawing
-    if (touches.length >= 2 && gestureState === 'drawing') {
-      // Cancel drawing immediately when second finger touches
-      setIsDrawing(false);
-      isTouchDrawingRef.current = false;
-      clearLiveCanvas();
-      currentStrokeRef.current = [];
-      lastRenderedIndexRef.current = 0;
-      shapeStartRef.current = null;
-      setGestureState('multi-touch');
-      
-      // Initialize zoom/pan tracking
-      touchStartDistanceRef.current = getTouchDistance(touches);
-      touchStartTransformRef.current = { ...transformRef.current };
-      touchStartCenterRef.current = {
-        x: (touches[0].clientX + touches[1].clientX) / 2,
-        y: (touches[0].clientY + touches[1].clientY) / 2
-      };
-      return;
-    }
-    
-    if (touches.length === 1 && gestureState === 'drawing' && isDrawing) {
-
-      // Single touch drawing - only if we're in drawing mode
+    if (touches.length === 1 && isDrawing) {
       const touch = touches[0];
       const pos = getPos(e as unknown as React.MouseEvent, containerRef, transformRef.current);
       
-      const pressurePoint: PressurePoint = {
-        x: pos.x,
-        y: pos.y,
-        pressure: 1,
-      };
-      
-      currentStrokeRef.current.push(pressurePoint);
+      currentStrokeRef.current.push({ x: pos.x, y: pos.y, pressure: 1 });
       
       if (activeTool === 'brush' || activeTool === 'eraser') {
-        scheduleRender();
-        // Sync live stroke during touch drawing
-        syncStrokeLive();
+        renderLiveStroke();
+        syncStrokeChunk();
       } else if (['rect', 'circle', 'line'].includes(activeTool)) {
         clearLiveCanvas();
         const endPos = currentStrokeRef.current[currentStrokeRef.current.length - 1];
@@ -1060,47 +799,22 @@ export default function DrawingCanvas({
   const handleTouchEnd = (e: React.TouchEvent) => {
     const touches = e.touches;
     
-    // Handle non-drawer touch end
     if (!isDrawer) {
       if (touches.length === 0) {
-        // All touches ended
-        setGestureState('idle');
         setIsPanning(false);
-        touchStartRef.current = null;
-        touchStartDistanceRef.current = null;
-        touchStartTransformRef.current = null;
-        touchStartCenterRef.current = null;
         panStartRef.current = null;
-      } else if (touches.length === 1 && gestureState === 'multi-touch') {
-        // Went from 2+ fingers to 1
-        setGestureState('idle');
-        touchStartDistanceRef.current = null;
-        touchStartTransformRef.current = null;
-        touchStartCenterRef.current = null;
+        lastTouchDistanceRef.current = null;
       }
       return;
     }
-
     
-    // Remove ended touches from tracking
-    const changedTouches = e.changedTouches;
-    for (let i = 0; i < changedTouches.length; i++) {
-      activeTouchesRef.current.delete(changedTouches[i].identifier);
-    }
-    
-    // If no touches left, end everything
     if (touches.length === 0) {
-      // End drawing if we were drawing
-      if (gestureState === 'drawing' && isDrawing) {
-        if (!staticCtxRef.current || !liveCtxRef.current || !socket) return;
-        
+      if (isDrawing && staticCtxRef.current && liveCtxRef.current && socket) {
         setIsDrawing(false);
-        isTouchDrawingRef.current = false;
-        setGestureState('idle');
-
+        
         let stroke: Stroke;
         if (['rect', 'circle', 'line'].includes(activeTool)) {
-          const endPos = currentStrokeRef.current[currentStrokeRef.current.length - 1] || { x: 0, y: 0, pressure: 1 };
+          const endPos = currentStrokeRef.current[currentStrokeRef.current.length - 1] || shapeStartRef.current!;
           stroke = {
             id: Date.now().toString(),
             tool: 'shape',
@@ -1113,68 +827,32 @@ export default function DrawingCanvas({
             opacity: brushOpacity,
           };
           drawShape(staticCtxRef.current, stroke);
-        } else if (activeTool === 'brush' || activeTool === 'eraser') {
-          const points = currentStrokeRef.current;
-          if (points.length > 0) {
-            const taperedPoints = applyTapering(points);
-            
-            stroke = {
-              id: Date.now().toString(),
-              tool: activeTool as ToolType,
-              points: samplePointsForStorage(taperedPoints),
-              color: brushColor,
-              size: brushSize,
-              opacity: brushOpacity,
-              pressureData: taperedPoints.map(p => p.pressure),
-            };
-
-            drawStroke(staticCtxRef.current, stroke);
-          } else {
-            stroke = null as any;
-          }
         } else {
-          stroke = null as any;
+          stroke = {
+            id: Date.now().toString(),
+            tool: activeTool as ToolType,
+            points: currentStrokeRef.current.map(p => ({ x: p.x, y: p.y, pressure: p.pressure })),
+            color: brushColor,
+            size: brushSize,
+            opacity: brushOpacity,
+          };
+          drawStroke(staticCtxRef.current, stroke);
         }
-
-        if (stroke) {
-          strokesRef.current.push(stroke);
-          redoStackRef.current = [];
-          socket.emit('draw:stroke', { stroke });
-        }
-
+        
+        canvasStateRef.current.strokes.push(stroke);
+        canvasStateRef.current.redoStack = [];
+        socket.emit('draw:stroke', { stroke });
+        
         clearLiveCanvas();
         currentStrokeRef.current = [];
-        lastRenderedIndexRef.current = 0;
         shapeStartRef.current = null;
-      } else if (gestureState === 'multi-touch') {
-        // End multi-touch gesture
-        setGestureState('idle');
       }
-      
-      // Reset all touch refs
-      touchStartRef.current = null;
-      touchStartDistanceRef.current = null;
-      touchStartTransformRef.current = null;
-      touchStartCenterRef.current = null;
-      isTouchDrawingRef.current = false;
-      activeTouchesRef.current.clear();
-    } else if (touches.length === 1 && gestureState === 'multi-touch') {
-      // Went from 2+ fingers to 1 - transition back to idle
-      // Don't immediately start drawing, wait for new touch start
-      setGestureState('idle');
-      touchStartDistanceRef.current = null;
-      touchStartTransformRef.current = null;
-      touchStartCenterRef.current = null;
-      isTouchDrawingRef.current = false;
     }
   };
 
-
-  // Pointer event handler for pen tablet support
+  // Pointer handlers
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!isDrawer || !staticCtxRef.current || !liveCtxRef.current) {
-      // Non-drawers can only pan/zoom, not draw
-      // Allow panning with any left click, middle mouse, or space+click
+    if (!isDrawer) {
       if (e.button === 0 || e.button === 1) {
         e.preventDefault();
         setIsPanning(true);
@@ -1183,57 +861,29 @@ export default function DrawingCanvas({
       return;
     }
 
-    // RIGHT CLICK - Show context menu only, don't draw
     if (e.button === 2) {
       e.preventDefault();
       setContextMenu({ isOpen: true, x: e.clientX, y: e.clientY });
       return;
     }
 
-    // Close context menu if clicking on canvas while menu is open
     if (contextMenu.isOpen) {
       setContextMenu({ ...contextMenu, isOpen: false });
     }
     
     const isPen = e.pointerType === 'pen';
-    isPenActiveRef.current = isPen;
+    smoothedPressureRef.current = isPen && e.pressure > 0 ? e.pressure : 1;
     
-    const rawPressure = isPen && e.pressure > 0 
-      ? e.pressure 
-      : (isPen ? 0.5 : 1);
-    
-    currentPressureRef.current = rawPressure;
-    smoothedPressureRef.current = rawPressure;
-
-    // Check for modifier keys
     const hasCtrl = e.ctrlKey || e.metaKey;
-    const hasAlt = e.altKey;
     const hasSpace = keysPressedRef.current.has(' ');
 
-    // Ctrl + Space + Left Click = Scrubby Zoom
     if (hasCtrl && hasSpace && e.button === 0) {
       e.preventDefault();
       setIsZooming(true);
-      zoomStartRef.current = { 
-        x: e.clientX, 
-        y: e.clientY, 
-        initialScale: transform.scale 
-      };
+      zoomStartRef.current = { x: e.clientX, y: e.clientY, initialScale: transform.scale };
       return;
     }
 
-    // Ctrl + Alt + Right Click = HUD Brush Size
-    if (hasCtrl && hasAlt && e.button === 2) {
-      e.preventDefault();
-      setIsBrushSizing(true);
-      brushSizeStartRef.current = {
-        x: e.clientX,
-        initialSize: brushSize
-      };
-      return;
-    }
-
-    // Middle mouse button or Space + Left Click = Pan (works with mouse and pen)
     if (e.button === 1 || (e.button === 0 && hasSpace)) {
       e.preventDefault();
       setIsPanning(true);
@@ -1242,9 +892,7 @@ export default function DrawingCanvas({
     }
 
     e.preventDefault();
-    // Use transformRef to get latest transform state
     const pos = getPos(e as unknown as React.MouseEvent, containerRef, transformRef.current);
-    const liveCtx = liveCtxRef.current;
 
     if (activeTool === 'text') {
       setTextInput({ visible: true, x: pos.x, y: pos.y, value: '' });
@@ -1252,9 +900,8 @@ export default function DrawingCanvas({
     }
 
     if (activeTool === 'fill') {
-      // Capture canvas state BEFORE applying fill for undo support
-      const canvasState = staticCtxRef.current.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE).data;
-      floodFill(staticCtxRef.current, pos.x, pos.y, brushColor, brushOpacity);
+      const canvasState = staticCtxRef.current!.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE).data;
+      floodFill(staticCtxRef.current!, pos.x, pos.y, brushColor, brushOpacity);
       const stroke: Stroke = {
         id: Date.now().toString(),
         tool: 'fill',
@@ -1262,38 +909,28 @@ export default function DrawingCanvas({
         color: brushColor,
         size: brushSize,
         opacity: brushOpacity,
-        canvasState: new Uint8ClampedArray(canvasState), // Store copy of canvas state
+        canvasState: new Uint8ClampedArray(canvasState),
       };
-      strokesRef.current.push(stroke);
-      redoStackRef.current = [];
+      canvasStateRef.current.strokes.push(stroke);
+      canvasStateRef.current.redoStack = [];
       socket?.emit('draw:stroke', { stroke });
       return;
     }
 
-
     setIsDrawing(true);
-    
     shapeStartRef.current = pos;
-    currentStrokeRef.current = [{ 
-      x: pos.x, 
-      y: pos.y, 
-      pressure: smoothedPressureRef.current,
-      tiltX: (e as any).tiltX,
-      tiltY: (e as any).tiltY,
-    }];
-    
-    liveCtx.lineCap = 'round';
-    liveCtx.lineJoin = 'round';
+    currentStrokeRef.current = [{ x: pos.x, y: pos.y, pressure: smoothedPressureRef.current }];
+    currentStrokeIdRef.current = Date.now().toString();
+    syncedPointCountRef.current = 0;
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    // Handle panning for everyone (drawers and non-drawers)
     if (isPanning) {
       e.preventDefault();
       if (!panStartRef.current) return;
       const dx = e.clientX - panStartRef.current.x;
       const dy = e.clientY - panStartRef.current.y;
-      setTransform((prev) => ({
+      setTransform(prev => ({
         ...prev,
         translateX: prev.translateX + dx * 0.5,
         translateY: prev.translateY + dy * 0.5,
@@ -1302,83 +939,37 @@ export default function DrawingCanvas({
       return;
     }
 
-    // Non-drawers can only pan/zoom - block all drawing operations
-    if (!isDrawer && !isZooming) {
-      return;
-    }
+    if (!isDrawer && !isZooming) return;
 
-    // Handle zooming
     if (isZooming && zoomStartRef.current) {
       e.preventDefault();
       const dx = e.clientX - zoomStartRef.current.x;
       const zoomFactor = Math.exp(dx * 0.01);
-      const newScale = Math.max(0.1, Math.min(5, zoomStartRef.current.initialScale * zoomFactor));
-      setTransform((prev) => ({
-        ...prev,
-        scale: newScale,
-      }));
-      return;
-    }
-
-    // Handle brush sizing
-    if (isBrushSizing && brushSizeStartRef.current && onBrushSizeChange) {
-      e.preventDefault();
-      const dx = e.clientX - brushSizeStartRef.current.x;
-      const newSize = Math.max(1, Math.min(100, brushSizeStartRef.current.initialSize + dx * 0.5));
-      onBrushSizeChange(Math.round(newSize));
-      return;
-    }
-
-    if (e.pointerType === 'touch' && e.isPrimary === false) {
+      const newScale = Math.max(0.01, Math.min(3, zoomStartRef.current.initialScale * zoomFactor));
+      setTransform(prev => ({ ...prev, scale: newScale }));
       return;
     }
 
     if (!isDrawing || !liveCtxRef.current) return;
     e.preventDefault();
 
-    // @ts-ignore
-    const events = e.nativeEvent.getCoalescedEvents ? e.nativeEvent.getCoalescedEvents() : [e.nativeEvent];
+    const pos = getPosFromEvent(e.nativeEvent, containerRef, transformRef.current);
+    const isPen = e.pointerType === 'pen';
+    let rawPressure = isPen ? (e.pressure > 0 ? e.pressure : 0.5) : 1;
     
-    for (const ev of events) {
-      // Use transformRef to get latest transform state
-      const pos = getPosFromEvent(ev, containerRef, transformRef.current);
-      
-      const isPen = ev.pointerType === 'pen';
-      let rawPressure: number;
-      
-      if (isPen) {
-        if (ev.pressure > 0) {
-          rawPressure = ev.pressure;
-        } else {
-          rawPressure = smoothedPressureRef.current > 0.1 
-            ? smoothedPressureRef.current 
-            : 0.5;
-        }
-      } else {
-        rawPressure = 1;
-      }
-      
-      const prevSmoothed = smoothedPressureRef.current;
-      const newSmoothed = prevSmoothed + (rawPressure - prevSmoothed) * PRESSURE_SMOOTHING;
-      smoothedPressureRef.current = newSmoothed;
-      currentPressureRef.current = newSmoothed;
-      
-      const pressurePoint: PressurePoint = {
-        x: pos.x,
-        y: pos.y,
-        pressure: newSmoothed,
-        tiltX: (ev as any).tiltX,
-        tiltY: (ev as any).tiltY,
-      };
-      
-      // NO INTERPOLATION - distance-based stamping handles gaps
-      currentStrokeRef.current.push(pressurePoint);
-    }
+    const prevSmoothed = smoothedPressureRef.current;
+    const newSmoothed = prevSmoothed + (rawPressure - prevSmoothed) * 0.35;
+    smoothedPressureRef.current = newSmoothed;
+    
+    currentStrokeRef.current.push({
+      x: pos.x,
+      y: pos.y,
+      pressure: newSmoothed,
+    });
     
     if (activeTool === 'brush' || activeTool === 'eraser') {
-      scheduleRender();
-      // Sync live stroke during pointer drawing
-      syncStrokeLive();
+      renderLiveStroke();
+      syncStrokeChunk();
     } else if (['rect', 'circle', 'line'].includes(activeTool)) {
       clearLiveCanvas();
       const endPos = currentStrokeRef.current[currentStrokeRef.current.length - 1];
@@ -1395,29 +986,15 @@ export default function DrawingCanvas({
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    // Non-drawers can only pan/zoom
-    if (!isDrawer && !isPanning && !isZooming && !isBrushSizing) {
-      return;
-    }
-
-    // End panning
     if (isPanning) {
       setIsPanning(false);
       panStartRef.current = null;
       return;
     }
 
-    // End zooming
     if (isZooming) {
       setIsZooming(false);
       zoomStartRef.current = null;
-      return;
-    }
-
-    // End brush sizing
-    if (isBrushSizing) {
-      setIsBrushSizing(false);
-      brushSizeStartRef.current = null;
       return;
     }
 
@@ -1427,7 +1004,7 @@ export default function DrawingCanvas({
 
     let stroke: Stroke;
     if (['rect', 'circle', 'line'].includes(activeTool)) {
-      const endPos = currentStrokeRef.current[currentStrokeRef.current.length - 1] || { x: 0, y: 0, pressure: 1 };
+      const endPos = currentStrokeRef.current[currentStrokeRef.current.length - 1] || shapeStartRef.current!;
       stroke = {
         id: Date.now().toString(),
         tool: 'shape',
@@ -1441,112 +1018,32 @@ export default function DrawingCanvas({
       };
       drawShape(staticCtxRef.current, stroke);
     } else {
-      // Apply tapering at the end of stroke - gradually reduce pressure to 0
-      const points = currentStrokeRef.current;
-      const taperedPoints = applyTapering(points);
-      
       stroke = {
         id: Date.now().toString(),
         tool: activeTool as ToolType,
-        points: samplePointsForStorage(taperedPoints),
+        points: currentStrokeRef.current.map(p => ({ x: p.x, y: p.y, pressure: p.pressure })),
         color: brushColor,
         size: brushSize,
         opacity: brushOpacity,
-        pressureData: taperedPoints.map(p => p.pressure),
       };
-
       drawStroke(staticCtxRef.current, stroke);
     }
 
-    strokesRef.current.push(stroke);
-    redoStackRef.current = [];
+    canvasStateRef.current.strokes.push(stroke);
+    canvasStateRef.current.redoStack = [];
     socket.emit('draw:stroke', { stroke });
 
     clearLiveCanvas();
     currentStrokeRef.current = [];
-    lastRenderedIndexRef.current = 0;
     shapeStartRef.current = null;
-    isPenActiveRef.current = false;
-    currentPressureRef.current = 1;
     smoothedPressureRef.current = 1;
   };
 
-  // Undo/Redo/Clear functions
-  const undoInternal = useCallback(() => {
-    if (strokesRef.current.length === 0) return;
-    const removed = strokesRef.current.pop()!;
-    redoStackRef.current.push(removed);
-    redrawAllStrokes(staticCtxRef.current!, strokesRef.current);
-    clearLiveCanvas();
-  }, [clearLiveCanvas]);
-
-  const redoInternal = useCallback(() => {
-    if (redoStackRef.current.length === 0) return;
-    const stroke = redoStackRef.current.pop()!;
-    strokesRef.current.push(stroke);
-    drawStroke(staticCtxRef.current!, stroke);
-  }, []);
-
-  const clearCanvas = useCallback(() => {
-    if (!isDrawer) {
-      console.log('[DrawingCanvas] Non-drawer tried to clear canvas - blocked');
-      return;
-    }
-
-    strokesRef.current = [];
-    redoStackRef.current = [];
-    redrawAllStrokes(staticCtxRef.current!, []);
-    clearLiveCanvas();
-    socket?.emit('draw:clear');
-    onClear?.();
-  }, [isDrawer, socket, onClear, clearLiveCanvas]);
-
-  const undo = useCallback(() => {
-    if (!isDrawer) {
-      console.log('[DrawingCanvas] Non-drawer tried to undo - blocked');
-      return;
-    }
-
-    undoInternal();
-    socket?.emit('draw:undo');
-    onUndo?.();
-  }, [isDrawer, socket, onUndo, undoInternal]);
-
-  const redo = useCallback(() => {
-    if (!isDrawer) {
-      console.log('[DrawingCanvas] Non-drawer tried to redo - blocked');
-      return;
-    }
-
-    redoInternal();
-    socket?.emit('draw:redo');
-    onRedo?.();
-  }, [isDrawer, socket, onRedo, redoInternal]);
-
-  const resetTransform = useCallback(() => {
-    setTransform({ scale: 1, translateX: 0, translateY: 0, rotation: 0 });
-  }, []);
-
-  const zoomIn = useCallback(() => {
-    setTransform((prev) => ({ ...prev, scale: Math.min(3, prev.scale * 1.2) }));
-  }, []);
-
-  const zoomOut = useCallback(() => {
-    setTransform((prev) => ({ ...prev, scale: Math.max(0.5, prev.scale / 1.2) }));
-  }, []);
-
-  const rotate = useCallback((direction: 'cw' | 'ccw') => {
-    setTransform((prev) => ({
-      ...prev,
-      rotation: prev.rotation + (direction === 'cw' ? 90 : -90),
-    }));
-  }, []);
-
   const handleWheel = (e: React.WheelEvent) => {
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    setTransform((prev) => ({
+    setTransform(prev => ({
       ...prev,
-      scale: Math.max(0.5, Math.min(3, prev.scale * delta)),
+      scale: Math.max(0.01, Math.min(3, prev.scale * delta)),
     }));
   };
 
@@ -1566,29 +1063,14 @@ export default function DrawingCanvas({
       text,
     };
 
-    strokesRef.current.push(stroke);
-    redoStackRef.current = [];
+    canvasStateRef.current.strokes.push(stroke);
+    canvasStateRef.current.redoStack = [];
     socket.emit('draw:stroke', { stroke });
     setTextInput({ visible: false, x: 0, y: 0, value: '' });
   };
 
-  useEffect(() => {
-    (window as any).canvasControls = {
-      clear: clearCanvas,
-      undo,
-      redo,
-      zoomIn,
-      zoomOut,
-      resetTransform,
-      rotate,
-    };
-  }, [clearCanvas, undo, redo, zoomIn, zoomOut, resetTransform, rotate]);
-
   return (
-    <div
-      ref={containerRef}
-      className="canvas-container"
-    >
+    <div ref={containerRef} className="canvas-container">
       <TransformControls
         transform={transform}
         show={showTransformControls}
@@ -1596,7 +1078,7 @@ export default function DrawingCanvas({
         onZoomIn={zoomIn}
         onZoomOut={zoomOut}
         onReset={resetTransform}
-        onRotate={rotate}
+        onRotate={(dir) => setTransform(prev => ({ ...prev, rotation: prev.rotation + (dir === 'cw' ? 90 : -90) }))}
       />
 
       <div className="canvas-viewport">
@@ -1606,17 +1088,24 @@ export default function DrawingCanvas({
             transform: `translate(${transform.translateX}px, ${transform.translateY}px) rotate(${transform.rotation}deg) scale(${transform.scale})`,
           }}
         >
+          {/* Background layer - white, locked, never touched */}
+          <canvas
+            ref={backgroundCanvasRef}
+            className="canvas-background"
+            width={CANVAS_SIZE}
+            height={CANVAS_SIZE}
+          />
+          {/* Drawing layer - all strokes drawn here */}
           <canvas
             ref={staticCanvasRef}
             className="canvas-static"
             width={CANVAS_SIZE}
             height={CANVAS_SIZE}
           />
+          {/* Live layer - preview strokes */}
           <canvas
             ref={liveCanvasRef}
-            className={clsx('canvas-live', { 
-              'view-only': !isDrawer 
-            })}
+            className={clsx('canvas-live', { 'view-only': !isDrawer })}
             width={CANVAS_SIZE}
             height={CANVAS_SIZE}
             onPointerDown={handlePointerDown}
@@ -1624,20 +1113,23 @@ export default function DrawingCanvas({
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
             onWheel={handleWheel}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
           />
+
         </div>
       </div>
 
-      <BrushSettingsMenu
-        settings={brushSettings}
-        onSettingsChange={setBrushSettings}
-        isOpen={contextMenu.isOpen}
-        position={{ x: contextMenu.x, y: contextMenu.y }}
-        onClose={() => setContextMenu({ ...contextMenu, isOpen: false })}
-      />
+      {contextMenu.isOpen && (
+        <div 
+          className="context-menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={() => setContextMenu({ ...contextMenu, isOpen: false })}
+        >
+          <div className="menu-item" onClick={() => { undo(); setContextMenu({ ...contextMenu, isOpen: false }); }}>Undo</div>
+          <div className="menu-item" onClick={() => { redo(); setContextMenu({ ...contextMenu, isOpen: false }); }}>Redo</div>
+          <div className="menu-item danger" onClick={() => { handleClearCanvas(); setContextMenu({ ...contextMenu, isOpen: false }); }}>Clear</div>
+
+        </div>
+      )}
 
       <TextInputOverlay
         visible={textInput.visible}
@@ -1646,7 +1138,7 @@ export default function DrawingCanvas({
         value={textInput.value}
         color={brushColor}
         size={brushSize}
-        onChange={(value) => setTextInput((prev) => ({ ...prev, value }))}
+        onChange={(value) => setTextInput(prev => ({ ...prev, value }))}
         onSubmit={() => addText(textInput.x, textInput.y, textInput.value)}
         onCancel={() => setTextInput({ visible: false, x: 0, y: 0, value: '' })}
       />

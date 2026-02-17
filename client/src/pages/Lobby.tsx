@@ -420,6 +420,7 @@ export default function Lobby() {
       <AnimatePresence>
         {showLeaderboard && (
           <motion.div
+            key="leaderboard-modal"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -433,6 +434,7 @@ export default function Lobby() {
             }}
             onClick={() => setShowLeaderboard(false)}
           >
+
             <motion.div
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
@@ -520,14 +522,16 @@ export default function Lobby() {
       {/* Create Room Modal */}
       <AnimatePresence>
         {showCreateModal && (
-          <CreateRoomModal onClose={() => setShowCreateModal(false)} />
+          <CreateRoomModal key="create-room-modal" onClose={() => setShowCreateModal(false)} />
         )}
       </AnimatePresence>
+
 
       {/* Password Modal */}
       <AnimatePresence>
         {showPasswordModal && selectedRoom && (
           <motion.div
+            key="password-modal"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -543,6 +547,7 @@ export default function Lobby() {
             }}
             onClick={() => setShowPasswordModal(false)}
           >
+
             <motion.form
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}

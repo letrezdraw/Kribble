@@ -46,12 +46,11 @@ export default function GameRoomMobile() {
   const [brushSize, setBrushSize] = useState(5);
   const [brushColor, setBrushColor] = useState('#000000');
   const [brushOpacity, setBrushOpacity] = useState(100);
-  const [showChat, setShowChat] = useState(false);
-
   const [showPlayers, setShowPlayers] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showToolbar, setShowToolbar] = useState(true);
+
 
   const [gameSettings, setGameSettings] = useState({
     maxPlayers: room?.maxPlayers || 8,
@@ -69,10 +68,11 @@ export default function GameRoomMobile() {
 
   // Auto-scroll chat
   useEffect(() => {
-    if (chatMessagesRef.current && showChat) {
+    if (chatMessagesRef.current) {
       chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight;
     }
-  }, [messages, showChat]);
+  }, [messages]);
+
 
   useEffect(() => {
     if (roomId && !room) {
@@ -165,16 +165,15 @@ export default function GameRoomMobile() {
   const isSoloMode = gameState.phase === 'freeDraw' || room?.settings?.gameMode === 'solo' || (room?.players?.length === 1 && room?.maxPlayers === 1);
 
   const toggleFullscreen = () => {
-    setIsFullscreen(!isFullscreen);
-    setShowToolbar(!isFullscreen);
+    const newFullscreen = !isFullscreen;
+    setIsFullscreen(newFullscreen);
+    setShowToolbar(!newFullscreen);
   };
 
   // Reset canvas transform on mount to ensure proper initial state (50% zoom for mobile)
   useEffect(() => {
-    // Set mobile canvas to 50% zoom for better viewport
     if ((window as any).canvasControls) {
       (window as any).canvasControls.resetTransform();
-      // Override with mobile-optimized zoom
       setTimeout(() => {
         (window as any).canvasControls.zoomOut?.();
         (window as any).canvasControls.zoomOut?.();
@@ -182,9 +181,7 @@ export default function GameRoomMobile() {
     }
   }, []);
 
-
   // If in lobby, show full lobby screen
-
   if (gameState.phase === 'lobby') {
     return (
       <div className="game-room-mobile lobby-screen">
@@ -326,14 +323,14 @@ export default function GameRoomMobile() {
         </main>
 
         {/* Chat Button - Always visible in lobby */}
-        <button className="floating-chat-btn" onClick={() => setShowChat(true)}>
+        <button className="floating-chat-btn" onClick={() => setShowPlayers(true)}>
           <MessageCircle size={24} />
           {messages.length > 0 && <span className="badge">{messages.length}</span>}
         </button>
 
-        {/* Chat Bottom Sheet */}
+        {/* Chat Bottom Sheet for Lobby */}
         <AnimatePresence>
-          {showChat && (
+          {showPlayers && (
             <motion.div 
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
@@ -343,7 +340,7 @@ export default function GameRoomMobile() {
             >
               <div className="sheet-header">
                 <h3>Chat</h3>
-                <button className="icon-btn" onClick={() => setShowChat(false)}>
+                <button className="icon-btn" onClick={() => setShowPlayers(false)}>
                   <X size={20} />
                 </button>
               </div>
@@ -409,10 +406,6 @@ export default function GameRoomMobile() {
           </div>
 
           <div className="header-actions">
-            <button className="action-btn" onClick={() => setShowChat(true)}>
-              <MessageCircle size={22} />
-              {messages.length > 0 && <span className="dot" />}
-            </button>
             <button className="action-btn" onClick={() => setShowPlayers(true)}>
               <Users size={22} />
             </button>
@@ -451,7 +444,6 @@ export default function GameRoomMobile() {
             <span>Waiting for {room?.players?.find(p => p.isDrawer)?.username || 'drawer'} to choose...</span>
           </div>
         )}
-
       </header>
 
       {/* Canvas Area */}
@@ -463,12 +455,11 @@ export default function GameRoomMobile() {
             brushSize={brushSize}
             brushOpacity={brushOpacity / 100}
             activeTool={activeTool}
-
             shapeType={activeTool === 'rect' || activeTool === 'circle' || activeTool === 'line' ? activeTool : 'rect'}
             onToolChange={setActiveTool}
             onBrushSizeChange={setBrushSize}
             onBrushColorChange={setBrushColor}
-            onBrushOpacityChange={() => {}}
+            isMobile={true}
           />
         </div>
 
@@ -481,6 +472,8 @@ export default function GameRoomMobile() {
         {(isDrawer || gameState.phase === 'freeDraw') && showToolbar && (
           <div className="floating-toolbar">
             <div className="toolbar-section tools">
+
+
               <button className={`tool-btn ${activeTool === 'brush' ? 'active' : ''}`} onClick={() => setActiveTool('brush')}>
                 <Pencil size={18} />
               </button>
@@ -519,16 +512,11 @@ export default function GameRoomMobile() {
                 <input type="range" min="1" max="50" value={brushSize} onChange={(e) => setBrushSize(parseInt(e.target.value))} className="size-slider" />
                 <span className="slider-value">{brushSize}</span>
               </div>
-              <div className="slider-group">
-                <span className="slider-label">Opacity</span>
-                <input type="range" min="1" max="100" value={brushOpacity} onChange={(e) => setBrushOpacity(parseInt(e.target.value))} className="opacity-slider" />
-                <span className="slider-value">{brushOpacity}%</span>
-              </div>
               <button className="tool-btn" onClick={handleUndo}><Undo2 size={18} /></button>
+
               <button className="tool-btn" onClick={handleRedo}><Redo2 size={18} /></button>
               <button className="tool-btn danger" onClick={handleClearCanvas}><Trash2 size={18} /></button>
             </div>
-
           </div>
         )}
 
@@ -537,6 +525,41 @@ export default function GameRoomMobile() {
             <Palette size={20} />
           </button>
         )}
+
+        {/* Fixed Chat Panel - Bottom 30% (Permanent, no toggle) */}
+        <div className="fixed-chat-panel">
+          <div className="chat-messages-scrollable" ref={chatMessagesRef}>
+            {messages.length === 0 ? (
+              <div className="empty-state-compact">
+                <MessageCircle size={20} />
+                <p>No messages yet</p>
+              </div>
+            ) : (
+              messages.map((msg, index) => (
+                <div 
+                  key={`${msg.id}-${index}`} 
+                  className={`chat-bubble-compact ${msg.isCorrect ? 'correct' : ''} ${msg.playerId === 'system' ? 'system' : ''}`}
+                >
+                  <span className="sender-compact">{msg.username}:</span>
+                  <span className="text-compact">{msg.message}</span>
+                </div>
+              ))
+            )}
+          </div>
+          <form className="chat-input-compact" onSubmit={handleSendGuess}>
+            <input
+              type="text"
+              placeholder={isDrawer ? "Chat..." : "Your guess..."}
+              value={guess}
+              onChange={(e) => setGuess(e.target.value)}
+              className="chat-input-field"
+            />
+            <Button type="submit" variant="primary" size="sm" disabled={!guess.trim()}>
+              <Send size={14} />
+            </Button>
+          </form>
+        </div>
+
 
         {/* Overlays */}
         {gameState.phase === 'selection' && isDrawer && (
@@ -585,34 +608,6 @@ export default function GameRoomMobile() {
           </div>
         )}
       </main>
-
-      {/* Chat Bottom Sheet */}
-      <AnimatePresence>
-        {showChat && (
-          <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 25, stiffness: 300 }} className="bottom-sheet">
-            <div className="sheet-header">
-              <h3>Chat</h3>
-              <button className="icon-btn" onClick={() => setShowChat(false)}><X size={20} /></button>
-            </div>
-            <div className="sheet-content chat-content" ref={chatMessagesRef}>
-              {messages.length === 0 ? (
-                <div className="empty-state"><MessageCircle size={32} /><p>No messages yet</p></div>
-              ) : (
-                messages.map((msg, index) => (
-                  <div key={`${msg.id}-${index}`} className={`chat-bubble ${msg.isCorrect ? 'correct' : ''} ${msg.playerId === 'system' ? 'system' : ''}`}>
-                    <span className="sender">{msg.username}</span>
-                    <span className="text">{msg.message}</span>
-                  </div>
-                ))
-              )}
-            </div>
-            <form className="chat-input-bar" onSubmit={handleSendGuess}>
-              <input type="text" placeholder={isDrawer ? "Chat..." : "Your guess..."} value={guess} onChange={(e) => setGuess(e.target.value)} className="chat-input" />
-              <Button type="submit" variant="primary" size="sm" disabled={!guess.trim()}><Send size={16} /></Button>
-            </form>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Players Bottom Sheet */}
       <AnimatePresence>

@@ -17,7 +17,9 @@ export interface Player {
   roundsPresent?: number[];
   scoreBeforeDisconnect?: number;
   drawingData?: any;
+  hasDrawnThisRound?: boolean; // Track if player has drawn in current round
 }
+
 
 
 
@@ -48,7 +50,9 @@ export interface GameState {
   timeRemaining: number;
   totalRounds: number;
   totalTurns: number; // Total turns in entire game (rounds * players)
+  drawnPlayerIds: string[]; // Track which players have drawn in current round
 }
+
 
 
 export interface Room {
@@ -98,7 +102,9 @@ export function createRoom(name: string, settings: Partial<RoomSettings> = {}): 
       timeRemaining: settings.roundTime || 60,
       totalRounds: settings.rounds || 3,
       totalTurns: 0, // Will be calculated when game starts based on player count
+      drawnPlayerIds: [], // Initialize empty - no one has drawn yet
     },
+
 
     createdAt: new Date(),
   };

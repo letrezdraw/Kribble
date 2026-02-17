@@ -726,11 +726,41 @@ export function setupSocketHandlers(io: Server) {
       const roomId = socketToRoom.get(socket.id);
       if (!roomId) return;
       
+      const room = getRoom(roomId);
+      if (room) {
+        // Store stroke in room canvas state for rejoining players
+        if (!room.canvasState) {
+          room.canvasState = [];
+        }
+        room.canvasState.push(data.stroke);
+      }
+      
       socket.to(roomId).emit('draw:stroke', { playerId: socket.id, stroke: data.stroke });
     });
 
+    // Chunked stroke transmission for live preview
+    socket.on('draw:stroke:chunk', (data: { strokeId: string; points: any[]; tool: string; color: string; size: number }) => {
+      // Rate limiting for chunks (more lenient)
+      if (!drawRateLimiter.canProceed(socket.id)) {
+        return;
+      }
+      
+      const roomId = socketToRoom.get(socket.id);
+      if (!roomId) return;
+      
+      // Broadcast chunk to other players for live preview
+      socket.to(roomId).emit('draw:stroke:chunk', { 
+        playerId: socket.id, 
+        strokeId: data.strokeId,
+        points: data.points,
+        tool: data.tool,
+        color: data.color,
+        size: data.size
+      });
+    });
 
     socket.on('draw:clear', () => {
+
       const roomId = socketToRoom.get(socket.id);
       if (!roomId) return;
       
@@ -1098,7 +1128,9 @@ export function setupSocketHandlers(io: Server) {
         timeRemaining: 0,
         totalRounds: room.settings.rounds,
         totalTurns: room.players.length * room.settings.rounds,
+        drawnPlayerIds: [], // Reset - no one has drawn in new game
       };
+
 
       
       // Reset player scores and flags
@@ -1508,18 +1540,40 @@ function startWordSelection(room: Room, io: Server) {
   
   // Clear canvas state for new round/drawer
   room.canvasState = [];
-  io.to(room.id).emit('CLEAR_CANVAS');
+  io.to(room.id).emit('draw:clear');
   console.log('[startWordSelection] Canvas cleared for new drawer');
+
+  // DRAWER ROTATION SYSTEM: Track who has drawn this round
+  // Get list of players who haven't drawn yet in this round
+  const availableDrawers = room.players.filter(p => !room.gameState.drawnPlayerIds.includes(p.id));
   
-  // Select next drawer
-  room.gameState.currentDrawerIndex = (room.gameState.currentDrawerIndex + 1) % room.players.length;
-  const drawer = room.players[room.gameState.currentDrawerIndex];
+  let drawer: Player;
   
-  // Reset drawer flags
+  if (availableDrawers.length === 0) {
+    // All players have drawn - reset for next round
+    room.gameState.drawnPlayerIds = [];
+    console.log('[startWordSelection] All players have drawn, resetting drawer tracking for new round');
+    
+    // Select first player for new round
+    room.gameState.currentDrawerIndex = 0;
+    drawer = room.players[0];
+  } else {
+    // Select next available drawer (first player who hasn't drawn)
+    // Find the index of the first available drawer
+    const nextDrawerIndex = room.players.findIndex(p => p.id === availableDrawers[0].id);
+    room.gameState.currentDrawerIndex = nextDrawerIndex;
+    drawer = availableDrawers[0];
+  }
+  
+  // Mark this player as having drawn
+  room.gameState.drawnPlayerIds.push(drawer.id);
+  
+  // Reset drawer flags and set new drawer
   room.players.forEach(p => p.isDrawer = false);
   drawer.isDrawer = true;
   
-  console.log('[startWordSelection] Drawer selected:', drawer.username, 'ID:', drawer.id);
+  console.log('[startWordSelection] Drawer selected:', drawer.username, 'ID:', drawer.id, 'Drawn this round:', room.gameState.drawnPlayerIds.length, '/', room.players.length);
+
 
   
   // Generate 5 word options for drawer
@@ -1745,7 +1799,12 @@ function endTurn(room: Room, io: Server) {
     roomHintTimers.delete(room.id);
   }
 
+  // Clear canvas state and notify clients
+  room.canvasState = [];
+  io.to(room.id).emit('game:round:end');
+
   room.gameState.phase = 'turnEnd';
+
   
   // Broadcast phase change to all clients
   io.to(room.id).emit('PHASE_CHANGE', {
@@ -1829,8 +1888,17 @@ function endRound(room: Room, io: Server) {
     roomHintTimers.delete(room.id);
   }
 
+  // Clear canvas state and notify clients
+  room.canvasState = [];
+  io.to(room.id).emit('game:round:end');
+
+  // Reset drawer tracking for the round that just ended
+  room.gameState.drawnPlayerIds = [];
+  console.log(`[endRound] Round ${room.gameState.currentRound} ended - reset drawer tracking`);
   
   room.gameState.phase = 'roundEnd';
+
+
   
   // Broadcast phase change to all clients
   io.to(room.id).emit('PHASE_CHANGE', {

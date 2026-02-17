@@ -565,6 +565,16 @@ export default function GameRoom() {
             </div>
           )}
 
+          {/* Drawer Indicator - Shows current drawer in multiplayer */}
+          {gameState.phase === 'drawing' && !isSoloMode && (
+            <div className="drawer-indicator">
+              <Pencil size={16} />
+              <span className="drawer-label">
+                {isDrawer ? 'You are drawing' : `${room?.players.find((p: Player) => p.isDrawer)?.username || 'Someone'} is drawing`}
+              </span>
+            </div>
+          )}
+
           {/* Canvas */}
           <div className="canvas-wrapper">
             <DrawingCanvas
@@ -577,9 +587,10 @@ export default function GameRoom() {
               onToolChange={setActiveTool}
               onBrushSizeChange={setBrushSize}
               onBrushColorChange={setBrushColor}
-              onBrushOpacityChange={() => {}}
             />
           </div>
+
+
 
           {/* Drawing Tools - Only for drawer */}
           {(isDrawer || gameState.phase === 'freeDraw') && (

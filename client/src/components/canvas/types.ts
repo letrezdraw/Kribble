@@ -16,7 +16,8 @@ export interface Transform {
   rotation: number;
 }
 
-export type ToolType = 'brush' | 'eraser' | 'rect' | 'circle' | 'line' | 'text' | 'fill';
+export type ToolType = 'brush' | 'eraser' | 'rect' | 'circle' | 'line' | 'text' | 'fill' | 'clear';
+
 
 
 export interface Stroke {
@@ -33,7 +34,9 @@ export interface Stroke {
   pressureData?: number[]; // Array of pressure values for each point
   isLive?: boolean; // Flag for live stroke preview
   canvasState?: Uint8ClampedArray; // Canvas ImageData for fill tool undo support
+  clearedStrokes?: Stroke[]; // Stores all strokes for clear/undo support
 }
+
 
 
 

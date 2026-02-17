@@ -9,6 +9,9 @@
   overflow: hidden;
   background: white;
   border-radius: var(--radius-xl);
+  /* FIX: Prevent pull-to-refresh and other browser gestures */
+  overscroll-behavior: none;
+  touch-action: none;
 }
 
 /* Viewport - clips the transformed canvas */
@@ -21,6 +24,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  /* FIX: Prevent pull-to-refresh */
+  overscroll-behavior: none;
+  touch-action: none;
 }
 
 /* Inner container that gets the CSS transform */
@@ -31,6 +37,8 @@
   transform-origin: center center;
   will-change: transform;
   flex-shrink: 0;
+  /* FIX: Prevent browser gestures */
+  touch-action: none;
 }
 
 
@@ -40,6 +48,20 @@
 }
 
 /* Canvas elements - fixed size 800x800 */
+/* Background layer - white, locked, never touched */
+.canvas-background {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 800px;
+  height: 800px;
+  z-index: 0;
+  touch-action: none;
+  pointer-events: none;
+  background: white;
+}
+
+/* Drawing layer - all strokes drawn here */
 .canvas-static {
   position: absolute;
   top: 0;
@@ -50,6 +72,7 @@
   touch-action: none;
 }
 
+/* Live layer - preview strokes */
 .canvas-live {
   position: absolute;
   top: 0;
@@ -59,7 +82,13 @@
   z-index: 2;
   cursor: crosshair;
   touch-action: none;
+  /* FIX: Prevent text selection and callout on iOS */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
+
+
 
 .canvas-live.panning {
   cursor: grabbing;
@@ -135,10 +164,13 @@
     user-select: none;
     -webkit-user-select: none;
     -webkit-touch-callout: none;
+    /* FIX: Prevent pull-to-refresh on mobile */
+    overscroll-behavior: none;
   }
   
   .canvas-viewport {
     touch-action: none;
+    overscroll-behavior: none;
   }
   
   .canvas-inner {
