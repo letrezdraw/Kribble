@@ -236,16 +236,25 @@ async function initPostgres() {
   const { Pool } = await import('pg');
   pgPool = new Pool({
     connectionString: DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    connectionTimeoutMillis: 10000, // 10 second timeout
+    idleTimeoutMillis: 30000,
+    max: 10
   });
   
-  // Test connection
-  const client = await pgPool.connect();
+  // Test connection with timeout
+  const connectPromise = pgPool.connect();
+  const timeoutPromise = new Promise((_, reject) => 
+    setTimeout(() => reject(new Error('PostgreSQL connection timeout')), 10000)
+  );
+  
+  const client = await Promise.race([connectPromise, timeoutPromise]);
   console.log('[DB] PostgreSQL connected successfully');
-  client.release();
+  (client as any).release();
   
   return pgPool;
 }
+
 
 // Initialize FileDB (development)
 async function initFileDB() {
@@ -267,20 +276,44 @@ export async function initDatabase() {
   console.log('[DB] Initializing database...');
   console.log('[DB] Mode:', isPostgres ? 'PostgreSQL (Production)' : 'FileDB (Development)');
   
-  if (isPostgres) {
-    await initPostgres();
-  } else {
-    await initFileDB();
-  }
+  try {
+    if (isPostgres) {
+      await initPostgres();
+    } else {
+      await initFileDB();
+    }
 
-  
-  // Run migrations
-  const { runMigrations, seedDefaultCategories } = await import('./migrate.js');
-  await runMigrations(isPostgres ? pgPool : fileDb, isPostgres);
-  await seedDefaultCategories(isPostgres ? pgPool : fileDb, isPostgres);
-  
-  console.log('[DB] Database ready');
+    
+    // Run migrations with timeout
+    const migrationPromise = (async () => {
+      const { runMigrations, seedDefaultCategories } = await import('./migrate.js');
+      await runMigrations(isPostgres ? pgPool : fileDb, isPostgres);
+      await seedDefaultCategories(isPostgres ? pgPool : fileDb, isPostgres);
+    })();
+    
+    const migrationTimeout = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Database migration timeout')), 30000)
+    );
+    
+    await Promise.race([migrationPromise, migrationTimeout]);
+    
+    console.log('[DB] Database ready');
+  } catch (error) {
+    console.error('[DB] Database initialization failed:', error);
+    // Fall back to FileDB if PostgreSQL fails
+    if (isPostgres) {
+      console.log('[DB] Falling back to FileDB...');
+      await initFileDB();
+      const { runMigrations, seedDefaultCategories } = await import('./migrate.js');
+      await runMigrations(fileDb, false);
+      await seedDefaultCategories(fileDb, false);
+      console.log('[DB] FileDB fallback ready');
+    } else {
+      throw error;
+    }
+  }
 }
+
 
 // Query helpers
 export async function query(sql: string, params: any[] = []): Promise<any> {

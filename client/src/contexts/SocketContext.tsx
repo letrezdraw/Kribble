@@ -1,7 +1,9 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { decodeMessage, expandStroke } from '@kribble/shared';
 
 interface SocketContextType {
+
   socket: Socket | null;
   connected: boolean;
   reconnecting: boolean;
@@ -77,7 +79,25 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       setConnectionError('Failed to reconnect. Please try again later.');
     });
 
+    // Handle binary stroke data from server (MessagePack protocol)
+    newSocket.on('draw:stroke:binary', (buffer: Uint8Array) => {
+      try {
+        // Decode binary message
+        const decoded = decodeMessage<{ playerId: string; stroke: (string | number)[] }>(buffer);
+        const stroke = expandStroke(decoded.stroke);
+        
+        // Re-emit as regular stroke event for backward compatibility
+        newSocket.emit('draw:stroke:decoded', { 
+          playerId: decoded.playerId, 
+          stroke 
+        });
+      } catch (error) {
+        console.error('[Socket] Failed to decode binary stroke:', error);
+      }
+    });
+
     setSocket(newSocket);
+
 
     return () => {
       newSocket.close();

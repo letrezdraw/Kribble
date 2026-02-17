@@ -206,3 +206,6 @@ export interface ClientToServerEvents {
   'chat:message': (data: { message: string }) => void;
   'game:play-again': () => void;
 }
+
+// Export MessagePack utilities for binary protocol
+export * from './msgpack.js';

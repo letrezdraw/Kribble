@@ -5,6 +5,17 @@ import { rooms, getRoom, deleteRoom, createRoom, Room, Player, RoomSettings, Gam
 import { guessRateLimiter, chatRateLimiter, drawRateLimiter } from '../utils/rateLimiter.js';
 import { validateMessage, validateUsername } from '../utils/profanityFilter.js';
 import { logger } from '../utils/logger.js';
+import { 
+  encodeMessage, 
+  decodeMessage, 
+  compactStroke, 
+  expandStroke,
+  batchStrokes,
+  unbatchStrokes,
+  shouldUseBinary,
+  calculateSavings 
+} from '@kribble/shared';
+
 
 
 
@@ -716,7 +727,7 @@ export function setupSocketHandlers(io: Server) {
     });
 
 
-    // Drawing events
+    // Drawing events with MessagePack binary protocol support
     socket.on('draw:stroke', (data: { stroke: any }) => {
       // Rate limiting
       if (!drawRateLimiter.canProceed(socket.id)) {
@@ -735,8 +746,52 @@ export function setupSocketHandlers(io: Server) {
         room.canvasState.push(data.stroke);
       }
       
-      socket.to(roomId).emit('draw:stroke', { playerId: socket.id, stroke: data.stroke });
+      // Use compact binary format for stroke data (60% size reduction)
+      const compactData = compactStroke(data.stroke);
+      const encoded = encodeMessage({ playerId: socket.id, stroke: compactData });
+      
+      // Log bandwidth savings in development
+      if (process.env.NODE_ENV !== 'production') {
+        const savings = calculateSavings({ playerId: socket.id, stroke: data.stroke }, encoded);
+        if (savings.savingsPercent > 30) {
+          logger.trace('SOCKET', 'MessagePack bandwidth savings', savings);
+        }
+      }
+      
+      // Broadcast binary data to other players
+      socket.to(roomId).emit('draw:stroke:binary', encoded);
     });
+
+    // Handle binary stroke data from clients (for clients that support it)
+    socket.on('draw:stroke:binary', (buffer: Uint8Array) => {
+      // Rate limiting
+      if (!drawRateLimiter.canProceed(socket.id)) {
+        return;
+      }
+      
+      const roomId = socketToRoom.get(socket.id);
+      if (!roomId) return;
+      
+      try {
+        // Decode binary message
+        const decoded = decodeMessage<{ playerId: string; stroke: (string | number)[] }>(buffer);
+        const stroke = expandStroke(decoded.stroke);
+        
+        const room = getRoom(roomId);
+        if (room) {
+          if (!room.canvasState) {
+            room.canvasState = [];
+          }
+          room.canvasState.push(stroke);
+        }
+        
+        // Forward to other players
+        socket.to(roomId).emit('draw:stroke:binary', buffer);
+      } catch (error) {
+        logger.error('SOCKET', 'Failed to decode binary stroke', error as Error);
+      }
+    });
+
 
     // Chunked stroke transmission for live preview
     socket.on('draw:stroke:chunk', (data: { strokeId: string; points: any[]; tool: string; color: string; size: number }) => {

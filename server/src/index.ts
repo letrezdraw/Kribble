@@ -129,11 +129,22 @@ app.get('/api/users/online/count', (req: Request, res: Response) => {
 // Initialize database and then start server
 async function startServer() {
   try {
-    // Initialize database first
-    await initDatabase();
+    // Initialize database first with timeout protection
+    const dbInitPromise = initDatabase();
+    const dbTimeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Database initialization timeout')), 45000)
+    );
+    
+    try {
+      await Promise.race([dbInitPromise, dbTimeoutPromise]);
+    } catch (dbError) {
+      console.error('[Server] Database initialization failed or timed out:', dbError);
+      console.log('[Server] Continuing with limited functionality...');
+    }
     
     // Start cleanup scheduler for room maintenance
     const cleanupInterval = startCleanupScheduler(5 * 60 * 1000); // Run every 5 minutes
+
 
     // Start guest user cleanup scheduler (run every hour)
     const guestCleanupInterval = setInterval(() => {
