@@ -273,6 +273,20 @@
   margin-top: 8px;
 }
 
+.leave-btn {
+  margin-top: 12px;
+  color: var(--text-secondary) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  background: transparent !important;
+}
+
+.leave-btn:active {
+  color: var(--error) !important;
+  border-color: var(--error) !important;
+  background: rgba(239, 68, 68, 0.1) !important;
+}
+
+
 /* Floating Chat Button in Lobby */
 .floating-chat-btn {
   position: fixed;

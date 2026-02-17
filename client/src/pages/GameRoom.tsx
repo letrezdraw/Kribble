@@ -426,6 +426,18 @@ export default function GameRoom() {
                   <div className="spinner-large"></div>
                   <h2>Waiting for players...</h2>
                   <p>Share the room code with friends to join!</p>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={() => {
+                      leaveRoom();
+                      navigate('/lobby');
+                    }}
+                    className="leave-room-btn"
+                  >
+                    <LogOut size={16} />
+                    Leave Room
+                  </Button>
                 </div>
                 <div className="waiting-right">
                   <div className="room-code-display">
@@ -444,6 +456,7 @@ export default function GameRoom() {
                     </div>
                   </div>
                 </div>
+
                 {/* Game Settings Panel - Beside waiting content */}
                 {showSettings && (
                   <div className={`game-settings-panel ${!isHost ? 'read-only' : ''}`}>

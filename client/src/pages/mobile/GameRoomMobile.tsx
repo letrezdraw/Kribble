@@ -319,8 +319,22 @@ export default function GameRoomMobile() {
                 Start Game
               </Button>
             )}
+            
+            <Button 
+              variant="ghost" 
+              fullWidth 
+              onClick={() => {
+                leaveRoom();
+                navigate('/lobby');
+              }}
+              className="leave-btn"
+            >
+              <LogOut size={18} />
+              Leave Room
+            </Button>
           </div>
         </main>
+
 
         {/* Chat Button - Always visible in lobby */}
         <button className="floating-chat-btn" onClick={() => setShowPlayers(true)}>

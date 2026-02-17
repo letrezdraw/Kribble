@@ -942,6 +942,19 @@ n/* ============================================
   margin: 0;
 }
 
+.leave-room-btn {
+  margin-top: var(--space-4);
+  color: var(--text-secondary) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+.leave-room-btn:hover {
+  color: var(--error) !important;
+  border-color: var(--error) !important;
+  background: rgba(239, 68, 68, 0.1) !important;
+}
+
+
 .room-code-display {
   display: flex;
   flex-direction: column;
