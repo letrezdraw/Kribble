@@ -66,9 +66,10 @@ export default function Lobby() {
       const response = await api.get('/users/online/count');
       setOnlineCount(response.data.count);
     } catch (error) {
-      console.error('Failed to fetch online count:', error);
+      // Silently handle error - online count is not critical
     }
   };
+
 
 
   const fetchLeaderboard = async () => {
@@ -76,9 +77,10 @@ export default function Lobby() {
       const response = await api.get('/users/leaderboard?limit=5');
       setLeaderboard(response.data.leaderboard);
     } catch (error) {
-      console.error('Failed to fetch leaderboard:', error);
+      // Silently handle error - leaderboard will retry on next poll
     }
   };
+
 
 
   const fetchRooms = async () => {
@@ -86,12 +88,12 @@ export default function Lobby() {
       const response = await api.get('/rooms');
       setRooms(response.data.rooms || []);
     } catch (error) {
-      console.error('Failed to fetch rooms:', error);
       setRooms([]);
     } finally {
       setLoading(false);
     }
   };
+
 
 
   useEffect(() => {
@@ -259,7 +261,7 @@ export default function Lobby() {
                 const entryRank = getRankByLevel(entry.level);
                 return (
                   <div 
-                    key={entry.userId}
+                    key={entry.userId || `lb-${index}`}
                     className="leaderboard-item"
                     onClick={() => setShowLeaderboard(true)}
                   >

@@ -78,10 +78,10 @@ export default function GameRoom() {
     if (roomId && !room) {
       const password = (location.state as any)?.password;
       const joinByCode = (location.state as any)?.joinByCode;
-      console.log('[GameRoom] Joining room:', roomId, password ? 'with password' : 'no password', joinByCode ? 'by code' : '');
       joinRoom(roomId, password, joinByCode);
     }
   }, [roomId, room, joinRoom, location.state]);
+
 
   // Sync room settings to local state - only for non-hosts to receive updates
   // Hosts manage their own local state until they apply
@@ -104,11 +104,9 @@ export default function GameRoom() {
   // FIX: Update settings function with proper room ID from room object
   const updateSettings = useCallback(() => {
     if (!isHost || !socket || !room?.id) {
-      console.log('[updateSettings] Cannot update - isHost:', isHost, 'socket:', !!socket, 'room?.id:', room?.id);
       return;
     }
     
-    console.log('[updateSettings] Emitting room:update-settings for room:', room.id);
     socket.emit('room:update-settings', {
       roomId: room.id,
       settings: {
@@ -122,6 +120,7 @@ export default function GameRoom() {
       }
     });
   }, [isHost, socket, room, gameSettings]);
+
 
 
   const handleClearCanvas = useCallback(() => {
@@ -161,9 +160,9 @@ export default function GameRoom() {
       });
       
       if (recentMessage) {
-        console.log('[GameRoom] Duplicate guess message blocked for:', data.username);
         return;
       }
+
       
       const messageId = generateMessageId();
       processedMessageIds.current.add(messageId);

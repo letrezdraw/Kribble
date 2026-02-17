@@ -10,8 +10,15 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "resolveJsonModule": true,
-    "declaration": true
+    "declaration": true,
+    "baseUrl": ".",
+    "paths": {
+      "@kribble/shared": ["../shared/dist/index.d.ts"],
+      "@kribble/shared/*": ["../shared/dist/*"]
+    }
+
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
+
 }

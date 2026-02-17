@@ -7,8 +7,6 @@ export interface Point {
   tiltY?: number;
 }
 
-
-
 export interface Transform {
   scale: number;
   translateX: number;
@@ -17,6 +15,45 @@ export interface Transform {
 }
 
 export type ToolType = 'brush' | 'eraser' | 'rect' | 'circle' | 'line' | 'text' | 'fill' | 'clear';
+
+// Input state machine for proper gesture separation
+export type InputState = 'idle' | 'drawing' | 'panning' | 'zooming' | 'gesturing';
+
+export interface InputContext {
+  state: InputState;
+  pointerType: 'mouse' | 'pen' | 'touch' | 'none';
+  isSpacePressed: boolean;
+  isCtrlPressed: boolean;
+  isAltPressed: boolean;
+  isShiftPressed: boolean;
+  activePointers: Map<number, PointerData>;
+  gestureStartDistance?: number;
+  gestureStartScale?: number;
+  gestureStartCenter?: Point;
+}
+
+export interface PointerData {
+  id: number;
+  type: 'mouse' | 'pen' | 'touch';
+  x: number;
+  y: number;
+  pressure: number;
+  buttons: number;
+  isPrimary: boolean;
+  timestamp: number;
+}
+
+// Keyboard shortcut definitions
+export interface KeyboardShortcut {
+  key: string;
+  ctrl?: boolean;
+  shift?: boolean;
+  alt?: boolean;
+  meta?: boolean;
+  action: string;
+  description: string;
+}
+
 
 
 

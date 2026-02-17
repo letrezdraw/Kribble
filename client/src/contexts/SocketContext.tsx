@@ -41,19 +41,18 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       setReconnecting(false);
       setConnectionError(null);
       setReconnectAttempts(0);
-      console.log('Socket connected');
     });
+
 
     newSocket.on('disconnect', (reason) => {
       setConnected(false);
-      console.log('Socket disconnected:', reason);
       if (reason === 'io server disconnect') {
         setConnectionError('Server disconnected. Please reconnect.');
       }
     });
 
+
     newSocket.on('connect_error', (error) => {
-      console.error('Connection error:', error);
       setConnectionError('Failed to connect to server. Retrying...');
       setReconnectAttempts(prev => prev + 1);
       if (reconnectAttempts >= 5) {
@@ -62,17 +61,18 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       }
     });
 
+
     newSocket.on('reconnect', (attemptNumber) => {
-      console.log('Reconnected after', attemptNumber, 'attempts');
       setReconnecting(false);
       setConnectionError(null);
       setReconnectAttempts(0);
     });
 
+
     newSocket.on('reconnect_attempt', (attemptNumber) => {
-      console.log('Reconnection attempt', attemptNumber);
       setReconnecting(true);
     });
+
 
     newSocket.on('reconnect_failed', () => {
       setReconnecting(false);
@@ -92,8 +92,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
           stroke 
         });
       } catch (error) {
-        console.error('[Socket] Failed to decode binary stroke:', error);
+        // Silently handle binary decode errors - stroke will be retried
       }
+
     });
 
     setSocket(newSocket);

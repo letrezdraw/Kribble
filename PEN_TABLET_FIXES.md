@@ -23,6 +23,7 @@
 
 **Solution:**
 - Added check: `if (isPen && e.buttons === 0) return;` in `handlePointerMove`
+
 - Ignores hover events where no buttons are pressed
 - Only processes actual drawing events
 

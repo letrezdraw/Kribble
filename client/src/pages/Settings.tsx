@@ -30,19 +30,21 @@ const loadSettings = () => {
       return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
     }
   } catch (e) {
-    console.error('Failed to load settings:', e);
+    // Silently handle localStorage errors - use defaults
   }
   return DEFAULT_SETTINGS;
 };
+
 
 // Save settings to localStorage
 const saveSettingsToStorage = (settings: typeof DEFAULT_SETTINGS) => {
   try {
     localStorage.setItem('kribble_settings', JSON.stringify(settings));
   } catch (e) {
-    console.error('Failed to save settings:', e);
+    // Silently handle localStorage errors
   }
 };
+
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -80,9 +82,9 @@ export default function Settings() {
           }));
         }
       } catch (err: any) {
-        console.error('Failed to load settings from API:', err);
-        // Fall back to localStorage
+        // Silently handle API error - fall back to localStorage
       } finally {
+
         setLoading(false);
       }
     };

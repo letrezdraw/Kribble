@@ -17,8 +17,12 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@kribble/shared": ["../shared/dist/index.d.ts"],
+      "@kribble/shared/*": ["../shared/dist/*"]
     }
+
+
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]

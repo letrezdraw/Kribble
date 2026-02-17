@@ -126,9 +126,9 @@ export function GameProvider({ children }: { children: ReactNode }) {
   }, [socket]);
 
   const startGame = useCallback(() => {
-    console.log('Start Game clicked, emitting room:start');
     socket?.emit('room:start');
   }, [socket]);
+
 
   const submitGuess = useCallback((guess: string) => {
     socket?.emit('guess:submit', { guess });
@@ -148,9 +148,9 @@ export function GameProvider({ children }: { children: ReactNode }) {
   }, [socket]);
 
   const selectWord = useCallback((word: string) => {
-    console.log('[GameContext] Selecting word:', word);
     socket?.emit('game:select-word', { word });
   }, [socket]);
+
 
 
   // Socket event listeners
@@ -158,8 +158,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
     if (!socket) return;
 
     socket.on('room:created', (data: { room: Room & { gameState?: any }; currentPlayerId: string }) => {
-      console.log('[GameContext] room:created received:', data);
       setRoom(data.room);
+
       setCurrentPlayerId(data.currentPlayerId);
       const currentPlayer = data.room.players.find(p => p.id === data.currentPlayerId);
       setIsHost(currentPlayer?.isHost || false);
@@ -174,8 +174,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
 
     socket.on('room:joined', (data: { room: Room & { gameState?: any }; currentPlayerId?: string; isRejoiningGame?: boolean }) => {
-      console.log('[GameContext] room:joined received:', data);
       setRoom(data.room);
+
       if (data.currentPlayerId) {
         setCurrentPlayerId(data.currentPlayerId);
         const currentPlayer = data.room.players.find(p => p.id === data.currentPlayerId);
@@ -185,8 +185,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
       
       // Check if rejoining an active game
       if (data.isRejoiningGame && data.room.gameState) {
-        console.log('[GameContext] Rejoining active game, restoring state:', data.room.gameState);
         const gs = data.room.gameState;
+
         setGameState(prev => ({
           ...prev,
           phase: gs.phase || 'lobby',
@@ -214,15 +214,14 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
 
     socket.on('room:player-joined', (data: { player: Player }) => {
-      console.log('[GameContext] room:player-joined received:', data);
       setRoom(prev => {
         if (!prev) return null;
         // Check if player already exists
         const exists = prev.players.find(p => p.id === data.player.id);
         if (exists) {
-          console.log('[GameContext] Player already exists, not adding');
           return prev;
         }
+
         return {
           ...prev,
           players: [...prev.players, data.player]
@@ -232,16 +231,16 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
 
     socket.on('room:player-left', (data: { playerId: string }) => {
-      console.log('[GameContext] room:player-left received:', data);
       setRoom(prev => prev ? {
+
         ...prev,
         players: prev.players.filter(p => p.id !== data.playerId)
       } : null);
     });
 
     socket.on('room:host-changed', (data: { newHostId: string; newHostName: string }) => {
-      console.log('[GameContext] room:host-changed received:', data);
       setRoom(prev => {
+
         if (!prev) return null;
         const updatedPlayers = prev.players.map(p => ({
           ...p,
@@ -263,8 +262,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
 
     socket.on('room:settings-updated', (data: { settings: RoomSettings; maxPlayers: number }) => {
-      console.log('[GameContext] room:settings-updated received:', data);
       setRoom(prev => {
+
         if (!prev) return null;
         return {
           ...prev,
@@ -275,9 +274,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
     });
 
     socket.on('room:players-updated', (data: { players: Player[] }) => {
-
-      console.log('[GameContext] room:players-updated received:', data);
       setRoom(prev => {
+
         if (!prev) return null;
         return {
           ...prev,
@@ -299,8 +297,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
     });
 
     socket.on('game:word-selection', (data: { drawer: Player; wordOptions: string[]; selectionTime: number }) => {
-      console.log('[GameContext] game:word-selection received:', data);
       setGameState(prev => ({
+
         ...prev,
         phase: 'selection',
         currentDrawer: data.drawer,
@@ -321,8 +319,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
     });
 
     socket.on('game:word-selected', (data: { word: string; blanks: string; hints: number; isDrawer?: boolean; isRejoin?: boolean }) => {
-      console.log('[GameContext] game:word-selected received:', { isDrawer: data.isDrawer, isRejoin: data.isRejoin });
       setGameState(prev => ({
+
         ...prev,
         phase: 'drawing',
         currentWord: data.word,
@@ -360,8 +358,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
 
     socket.on('game:hint-update', (data: { hints: string[]; hintsRemaining: number }) => {
-      console.log('[GameContext] game:hint-update received:', data);
       setGameState(prev => ({
+
         ...prev,
         wordHints: data.hints,
         hintsRemaining: data.hintsRemaining,
@@ -370,9 +368,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
 
     socket.on('game:guess-correct', (data: { playerId: string; username: string; word: string; points: number; scores?: { playerId: string; score: number }[] }) => {
-      console.log('[GameContext] game:guess-correct received:', data);
-      
       // If server sends full scores array, use it directly
+
       if (data.scores && data.scores.length > 0) {
         setGameState(prev => ({
           ...prev,
@@ -420,8 +417,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
 
     socket.on('game:round-end', (data: { word: string; scores: { playerId: string; score: number }[]; roundPoints?: any[] }) => {
-      console.log('[GameContext] game:round-end received:', data);
       setGameState(prev => ({
+
         ...prev,
         phase: 'roundEnd',
         currentWord: data.word,
@@ -443,8 +440,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
     // Handle turn-end event (between turns in same round)
     socket.on('game:turn-end', (data: { word: string; scores: { playerId: string; score: number }[]; turnPoints?: any[] }) => {
-      console.log('[GameContext] game:turn-end received:', data);
       // Update scores but stay in drawing phase (next turn starting)
+
       setRoom(prev => {
         if (!prev) return null;
         return {
@@ -460,8 +457,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
 
     socket.on('game:end', (data: { finalScores: { playerId: string; username: string; score: number; avatarId: string }[]; rankings: any[]; playAgain?: boolean }) => {
-      console.log('[GameContext] game:end received:', data);
       setGameState(prev => ({
+
         ...prev,
         phase: 'gameEnd',
         scores: data.finalScores.map(s => ({ playerId: s.playerId, score: s.score })),
@@ -471,8 +468,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
     // Handle PHASE_CHANGE events from server (authoritative state sync)
     socket.on('PHASE_CHANGE', (data: { phase: string; round?: number; turn?: number; totalRounds?: number; drawerId?: string; word?: string; wordLength?: number }) => {
-      console.log('[GameContext] PHASE_CHANGE received:', data);
       setGameState(prev => ({
+
         ...prev,
         phase: data.phase as GamePhase,
         currentRound: data.round ?? prev.currentRound,

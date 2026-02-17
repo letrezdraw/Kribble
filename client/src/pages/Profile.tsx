@@ -47,8 +47,9 @@ export default function Profile() {
         setMatchHistory(historyData.history);
       }
     } catch (error) {
-      console.error('Failed to fetch profile data:', error);
+      // Silently handle error - profile will show default/empty state
     } finally {
+
       setLoading(false);
     }
   };

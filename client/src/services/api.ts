@@ -1,17 +1,22 @@
 import axios from 'axios';
 
 // Use Vite environment variable for API URL
-// In development: set in .env.development (e.g., http://localhost:3001)
-// In production: empty string for same-origin (works when Express serves the client)
+// In development: use relative '/api' to leverage Vite proxy (configured in vite.config.ts)
+// In production: use VITE_API_URL or empty string for same-origin (works when Express serves the client)
 const API_URL = import.meta.env.VITE_API_URL || '';
 
-const api = axios.create({
-  baseURL: `${API_URL}/api`,
+// In development, always use relative path to leverage Vite proxy
+// In production, use the configured API_URL for cross-origin requests
+const isDevelopment = import.meta.env.DEV;
+const baseURL = isDevelopment ? '/api' : `${API_URL}/api`;
 
+const api = axios.create({
+  baseURL,
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
 
 // Add auth token to requests
 api.interceptors.request.use((config) => {
@@ -26,18 +31,21 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      // Only redirect if not on the initial auth check
-      const isAuthCheck = error.config?.url === '/auth/me';
-      if (!isAuthCheck) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        window.location.href = '/login';
-      }
+    const status = error.response?.status;
+    const isAuthCheck = error.config?.url === '/auth/me';
+    
+    // Handle 401 (unauthorized) and 404 (user not found) for auth check only
+    // Don't redirect on login/register failures - let the components handle those
+    if ((status === 401 || status === 404) && isAuthCheck) {
+      // Only clear storage for auth check failures, don't redirect
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
     }
     return Promise.reject(error);
   }
 );
+
+
 
 export default api;
 

@@ -54,9 +54,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(response.data.user);
       localStorage.setItem('user', JSON.stringify(response.data.user));
     } catch (error) {
-      // Only clear storage if token is actually invalid, not for network errors
-      const isAuthError = (error as any).response?.status === 401;
-      if (isAuthError) {
+      // Only clear storage if token is actually invalid (401) or user not found (404), not for network errors
+      const status = (error as any).response?.status;
+      if (status === 401 || status === 404) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         setUser(null);

@@ -68,8 +68,8 @@ export default function CreateRoomMobile({ onClose }: CreateRoomMobileProps) {
     if (!socket) return;
 
     const handleRoomCreated = (response: { room?: { id: string }; password?: string }) => {
-      console.log('[CreateRoomMobile] room:created received:', response);
       if (response.room?.id) {
+
         setLoading(false);
         navigate(`/room/${response.room.id}`, { state: { password: response.password } });
         onClose();

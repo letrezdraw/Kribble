@@ -10,6 +10,12 @@
     "resolveJsonModule": true,
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@kribble/shared": ["./shared/dist/index.d.ts"],
+      "@kribble/shared/*": ["./shared/dist/*"]
+    }
+
   }
 }
