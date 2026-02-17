@@ -15,12 +15,22 @@ import {
   shouldUseBinary,
   calculateSavings 
 } from '@kribble/shared';
+import {
+  createNewRoom,
+  joinExistingRoom,
+  handleDisconnect,
+  handleIntentionalLeave,
+  getRoomList as getManagedRoomList,
+  getServerStats as getManagedServerStats
+} from '../utils/roomManager.js';
 
 
 
 
-// Socket to room mapping
-const socketToRoom: Map<string, string> = new Map();
+
+// Use socketToRoom from roomManager for consistent state management
+import { socketToRoom } from '../utils/roomManager.js';
+
 
 // Track active timers per room
 const roomTimers = new Map<string, NodeJS.Timeout>();
@@ -207,31 +217,19 @@ export function setupSocketHandlers(io: Server) {
         return;
       }
 
+      // Use provided userId or generate one
+      const userId = data.userId || `player-${uuidv4()}`;
       
-      // Check if socket is already in a room - leave it first
-      const existingRoomId = socketToRoom.get(socket.id);
-      if (existingRoomId) {
-        logger.trace('SOCKET', 'Leaving existing room before creating new one', { existingRoomId }, data.userId, socket.id);
-        console.log('[room:create] Socket already in room:', existingRoomId, '- leaving first');
-        const existingRoom = getRoom(existingRoomId);
-        if (existingRoom) {
-          // Remove player from existing room
-          const playerIndex = existingRoom.players.findIndex(p => p.socketId === socket.id);
-          if (playerIndex !== -1) {
-            existingRoom.players.splice(playerIndex, 1);
-            io.to(existingRoomId).emit('room:player-left', { 
-              playerId: existingRoom.players[playerIndex]?.id,
-              username: data.username || 'Player'
-            });
-          }
-        }
-        socket.leave(existingRoomId);
-        socketToRoom.delete(socket.id);
+      // Use new room manager for proper state management
+      const result = createNewRoom(socket.id, userId, data.username || 'Player', data.name, data.settings);
+      
+      if (!result) {
+        socket.emit('room:error', { message: 'Failed to create room' });
+        return;
       }
       
-      const room = createRoom(data.name, data.settings);
+      const { room, player } = result;
       logger.gameState(room.id, 'ROOM_CREATED', { roomName: data.name, host: data.username, settings: data.settings });
-
       
       // Ensure room starts in lobby phase
       room.gameState.phase = 'lobby';
@@ -239,25 +237,10 @@ export function setupSocketHandlers(io: Server) {
       room.gameState.currentDrawerIndex = -1;
       room.gameState.currentWord = '';
       
-      // Create the host player with provided username or default
-      // Use actual userId if provided, otherwise generate a player ID
-      const hostPlayer: Player = {
-        id: data.userId || `player-${uuidv4()}`,
-        socketId: socket.id,
-        username: data.username || `Player1`,
-        avatarId: '👤',
-        score: 0,
-        isDrawer: false,
-        isHost: true,
-      };
-      
-      room.players.push(hostPlayer);
-      logger.userAction(hostPlayer.id, 'HOST_JOINED', { roomId: room.id, username: hostPlayer.username });
-      console.log('[room:create] Added host player:', hostPlayer.id, 'Total players:', room.players.length);
+      logger.userAction(player.id, 'HOST_JOINED', { roomId: room.id, username: player.username });
+      console.log('[room:create] Added host player:', player.id, 'Total players:', room.players.length);
       
       socket.join(room.id);
-
-      socketToRoom.set(socket.id, room.id);
       
       // Notify all clients that room list changed
       io.emit('room:updated');
@@ -273,13 +256,14 @@ export function setupSocketHandlers(io: Server) {
             avatarId: p.avatarId, 
             score: p.score, 
             isDrawer: p.isDrawer, 
-            isHost: p.isHost 
+            isHost: p.isHost,
+            connected: p.connected
           })),
           maxPlayers: room.maxPlayers, 
           settings: room.settings,
           gameState: room.gameState // Include game state to confirm lobby phase
         },
-        currentPlayerId: hostPlayer.id,
+        currentPlayerId: player.id,
         password: room.password // Send password so creator can auto-join
       });
       
@@ -287,343 +271,213 @@ export function setupSocketHandlers(io: Server) {
     });
 
 
+
     socket.on('room:join', (data: { roomId: string; password?: string; username?: string; joinByCode?: boolean; userId?: string }) => {
       logger.socketEvent('room:join', socket.id, { roomId: data.roomId, username: data.username, userId: data.userId, joinByCode: data.joinByCode });
       console.log('[room:join] Attempting to join room:', data.roomId, 'username:', data.username, 'userId:', data.userId, 'joinByCode:', data.joinByCode);
-
-      // CRITICAL FIX: Prevent race condition - check if join is already in progress for this user
-      if (data.userId && pendingJoins.has(data.userId)) {
-        logger.warn('SOCKET', 'Join already in progress, ignoring duplicate', { userId: data.userId, roomId: data.roomId });
-        console.log('[room:join] Join already in progress for user:', data.userId, 'ignoring duplicate request');
-        return;
-      }
-
-      
-      // Mark join as in progress
-      if (data.userId) {
-        pendingJoins.set(data.userId, true);
-      }
 
       // Validate username if provided
       if (data.username) {
         const usernameValidation = validateUsername(data.username);
         if (!usernameValidation.valid) {
           logger.warn('SOCKET', 'Join failed: Invalid username', { username: data.username, error: usernameValidation.error });
-          // Clear pending join on error
-          if (data.userId) {
-            pendingJoins.delete(data.userId);
-          }
           socket.emit('room:error', { message: usernameValidation.error });
           return;
         }
       }
 
+      // Use provided userId or generate one
+      const userId = data.userId || `player-${uuidv4()}`;
 
-      
-      // Try to find room by exact match first, then by partial match (for room code joining)
+      // Try to find room by exact match first, then by partial match
+      let targetRoomId = data.roomId;
       let room = getRoom(data.roomId);
       
-      // If not found and joinByCode is true, try to find room that starts with the provided code
+      // If not found and joinByCode is true, try partial match
       if (!room && data.joinByCode) {
         const partialMatch = Array.from(rooms.values()).find(r => r.id.startsWith(data.roomId));
         if (partialMatch) {
           console.log('[room:join] Found room by partial match:', partialMatch.id);
+          targetRoomId = partialMatch.id;
           room = partialMatch;
         }
       }
       
-      // Cancel pending deletion if room was empty
-      const pendingTimeout = roomsPendingDeletion.get(data.roomId);
-      if (pendingTimeout) {
-        console.log('[room:join] Cancelling pending deletion for room:', data.roomId);
-        clearTimeout(pendingTimeout);
-        roomsPendingDeletion.delete(data.roomId);
-      }
-
-      
       if (!room) {
         logger.warn('SOCKET', 'Join failed: Room not found', { roomId: data.roomId });
-        console.log('[room:join] Room not found:', data.roomId);
-        // Clear pending join on error
-        if (data.userId) {
-          pendingJoins.delete(data.userId);
-        }
         socket.emit('room:error', { message: 'Room not found' });
         return;
       }
 
-
-
-      // Check if player is already in the room (by socket ID or user ID)
-      const existingPlayer = room.players.find(p => p.socketId === socket.id || (data.userId && p.id === data.userId));
-      if (existingPlayer) {
-        console.log('[room:join] Player already in room (rejoining):', existingPlayer.id);
-        
-        // CRITICAL FIX: Remove any old disconnected entries for this userId to prevent duplicates
-        if (data.userId) {
-          const oldEntries = room.players.filter(p => p.id === data.userId && p.socketId !== socket.id);
-          for (const oldEntry of oldEntries) {
-            console.log('[room:join] Removing old disconnected entry for player:', oldEntry.username, 'socket:', oldEntry.socketId);
-            const oldIndex = room.players.findIndex(p => p.socketId === oldEntry.socketId);
-            if (oldIndex !== -1) {
-              room.players.splice(oldIndex, 1);
-            }
-            // Clear any pending removal timer for old entry
-            const oldRemovalTimeout = playersPendingRemoval.get(oldEntry.id);
-            if (oldRemovalTimeout) {
-              clearTimeout(oldRemovalTimeout);
-              playersPendingRemoval.delete(oldEntry.id);
-            }
-          }
-        }
-        
-        // CRITICAL FIX: Clear any pending removal timer for this player
-        const existingRemovalTimeout = playersPendingRemoval.get(existingPlayer.id);
-        if (existingRemovalTimeout) {
-          console.log('[room:join] Clearing pending removal timer for reconnected player:', existingPlayer.username);
-          clearTimeout(existingRemovalTimeout);
-          playersPendingRemoval.delete(existingPlayer.id);
-        }
-        
-        // Mark player as reconnected (no longer disconnected)
-        existingPlayer.disconnected = false;
-        existingPlayer.disconnectedAt = undefined;
-        
-        // Update socket ID in case it changed
-        existingPlayer.socketId = socket.id;
-        socketToRoom.set(socket.id, data.roomId);
-        socket.join(data.roomId);
-        
-        // Deduplicate players to ensure no duplicates
-        deduplicatePlayers(room, socket.id);
-        
-        // Clear pending join lock
-        if (data.userId) {
-          pendingJoins.delete(data.userId);
-        }
-        
-        // Notify all players that player reconnected
-        io.to(data.roomId).emit('room:player-reconnected', {
-          playerId: existingPlayer.id,
-          username: existingPlayer.username
-        });
-        io.emit('room:updated');
-        
-        socket.emit('room:joined', { 
-          room: { 
-            id: room.id, 
-            name: room.name, 
-            players: room.players.map(p => ({ id: p.id, username: p.username, avatarId: p.avatarId, score: p.score, isDrawer: p.isDrawer, isHost: p.isHost })),
-            maxPlayers: room.maxPlayers, 
-            settings: room.settings 
-          },
-          currentPlayerId: existingPlayer.id
-        });
-        return;
-      }
-
-      
-      // Check password for private rooms (skip if joining by room code or player is already in room)
+      // Check password for private rooms
       if (room.isPrivate && room.password && !data.joinByCode) {
         if (data.password !== room.password) {
           logger.warn('SOCKET', 'Join failed: Incorrect password', { roomId: data.roomId, userId: data.userId });
-          console.log('[room:join] Incorrect password for room:', data.roomId);
-          // Clear pending join on error
-          if (data.userId) {
-            pendingJoins.delete(data.userId);
-          }
           socket.emit('room:error', { message: 'Incorrect password' });
           return;
         }
       }
 
+      // Use new room manager for proper join handling
+      const result = joinExistingRoom(socket.id, userId, data.username || 'Player', targetRoomId);
       
-      if (room.players.length >= room.maxPlayers) {
-        logger.warn('SOCKET', 'Join failed: Room is full', { roomId: data.roomId, currentPlayers: room.players.length, maxPlayers: room.maxPlayers });
-        console.log('[room:join] Room is full:', data.roomId);
-        // Clear pending join on error
-        if (data.userId) {
-          pendingJoins.delete(data.userId);
-        }
-        socket.emit('room:error', { message: 'Room is full' });
+      if (!result.success || !result.room || !result.player) {
+        socket.emit('room:error', { message: result.error || 'Failed to join room' });
         return;
       }
 
-
+      const joinedRoom = result.room;
+      const player = result.player;
+      const isRejoin = result.isRejoin || false;
       
-      // CRITICAL FIX: Double-check for existing player by userId to prevent race condition duplicates
-      if (data.userId) {
-        const existingPlayerById = room.players.find(p => p.id === data.userId);
-        if (existingPlayerById) {
-          console.log('[room:join] RACE CONDITION: Player with userId already exists, treating as rejoin:', data.userId);
-          
-          // CRITICAL FIX: Remove any old disconnected entries for this userId to prevent duplicates
-          const oldEntries = room.players.filter(p => p.id === data.userId && p.socketId !== socket.id);
-          for (const oldEntry of oldEntries) {
-            console.log('[room:join] Removing old disconnected entry for player:', oldEntry.username, 'socket:', oldEntry.socketId);
-            const oldIndex = room.players.findIndex(p => p.socketId === oldEntry.socketId);
-            if (oldIndex !== -1) {
-              room.players.splice(oldIndex, 1);
-            }
-            // Clear any pending removal timer for old entry
-            const oldRemovalTimeout = playersPendingRemoval.get(oldEntry.id);
-            if (oldRemovalTimeout) {
-              clearTimeout(oldRemovalTimeout);
-              playersPendingRemoval.delete(oldEntry.id);
-            }
-          }
-          
-          // Clear any pending removal timer
-          const existingRemovalTimeout = playersPendingRemoval.get(existingPlayerById.id);
-          if (existingRemovalTimeout) {
-            clearTimeout(existingRemovalTimeout);
-            playersPendingRemoval.delete(existingPlayerById.id);
-          }
-          
-          // Mark as reconnected
-          existingPlayerById.disconnected = false;
-          existingPlayerById.disconnectedAt = undefined;
-          existingPlayerById.socketId = socket.id;
-          
-          socketToRoom.set(socket.id, data.roomId);
-          socket.join(data.roomId);
-          
-          // Deduplicate players to ensure no duplicates
-          deduplicatePlayers(room, socket.id);
-          
-          // Clear pending join lock
-          if (data.userId) {
-            pendingJoins.delete(data.userId);
-          }
-          
-          io.to(data.roomId).emit('room:player-reconnected', {
-            playerId: existingPlayerById.id,
-            username: existingPlayerById.username
-          });
-          io.emit('room:updated');
-          
-          socket.emit('room:joined', { 
-            room: { 
-              id: room.id, 
-              name: room.name, 
-              players: room.players.map(p => ({ id: p.id, username: p.username, avatarId: p.avatarId, score: p.score, isDrawer: p.isDrawer, isHost: p.isHost })),
-              maxPlayers: room.maxPlayers, 
-              settings: room.settings 
-            },
-            currentPlayerId: existingPlayerById.id
-          });
-          return;
-        }
+      logger.userAction(player.id, isRejoin ? 'PLAYER_REJOINED' : 'PLAYER_JOINED', { 
+        roomId: joinedRoom.id, 
+        username: player.username, 
+        totalPlayers: joinedRoom.players.length 
+      });
+      console.log('[room:join] Player', isRejoin ? 'rejoined' : 'joined', ':', player.id, 'Total players:', joinedRoom.players.length);
 
-      }
-
-      
-      // Use actual userId if provided, otherwise generate a player ID
-      const player: Player = {
-        id: data.userId || `player-${uuidv4()}`,
-        socketId: socket.id,
-        username: data.username || `Player${room.players.length + 1}`,
-        avatarId: '👤',
-        score: 0,
-        isDrawer: false,
-        isHost: room.players.length === 0,
-      };
-
-      
-      room.players.push(player);
-      logger.userAction(player.id, 'PLAYER_JOINED', { roomId: room.id, username: player.username, totalPlayers: room.players.length });
-      console.log('[room:join] Added player:', player.id, 'Total players:', room.players.length);
-
-      // Deduplicate players to ensure no duplicates after adding new player
-      deduplicatePlayers(room, socket.id);
-      
-      // Clear pending join lock after successful join
-      if (data.userId) {
-        pendingJoins.delete(data.userId);
-      }
-
-      
-      socket.join(data.roomId);
-      socketToRoom.set(socket.id, data.roomId);
-
+      socket.join(targetRoomId);
       
       // Check if game is already in progress
-      const isGameInProgress = room.gameState.phase !== 'lobby' && room.gameState.phase !== 'gameEnd';
+      const isGameInProgress = joinedRoom.gameState.phase !== 'lobby' && joinedRoom.gameState.phase !== 'gameEnd';
       
       // Notify player
       socket.emit('room:joined', { 
         room: { 
-          id: room.id, 
-          name: room.name, 
-          players: room.players.map(p => ({ id: p.id, username: p.username, avatarId: p.avatarId, score: p.score, isDrawer: p.isDrawer, isHost: p.isHost })),
-          maxPlayers: room.maxPlayers, 
-          settings: room.settings,
+          id: joinedRoom.id, 
+          name: joinedRoom.name, 
+          players: joinedRoom.players.map(p => ({ 
+            id: p.id, 
+            username: p.username, 
+            avatarId: p.avatarId, 
+            score: p.score, 
+            isDrawer: p.isDrawer, 
+            isHost: p.isHost,
+            connected: p.connected
+          })),
+          maxPlayers: joinedRoom.maxPlayers, 
+          settings: joinedRoom.settings,
           gameState: isGameInProgress ? {
-            phase: room.gameState.phase,
-            currentRound: room.gameState.currentRound,
-            currentTurn: room.gameState.currentTurn,
-            totalRounds: room.gameState.totalRounds,
-            currentWord: room.gameState.currentWord,
-            wordHints: room.gameState.wordHints,
-            hintsRemaining: room.gameState.hintsRemaining,
-            timeRemaining: room.gameState.timeRemaining,
-            drawerId: room.players[room.gameState.currentDrawerIndex]?.id
+            phase: joinedRoom.gameState.phase,
+            currentRound: joinedRoom.gameState.currentRound,
+            currentTurn: joinedRoom.gameState.currentTurn,
+            totalRounds: joinedRoom.gameState.totalRounds,
+            currentWord: joinedRoom.gameState.currentWord,
+            wordHints: joinedRoom.gameState.wordHints,
+            hintsRemaining: joinedRoom.gameState.hintsRemaining,
+            timeRemaining: joinedRoom.gameState.timeRemaining,
+            drawerId: joinedRoom.players[joinedRoom.gameState.currentDrawerIndex]?.id
           } : undefined
         },
         currentPlayerId: player.id,
-        isRejoiningGame: isGameInProgress
+        isRejoiningGame: isGameInProgress || isRejoin
       });
       
-      // If game is in progress, send additional game state events
+      // If game is in progress, send additional game state
       if (isGameInProgress) {
         console.log('[room:join] Player rejoining active game, sending game state');
         
-        // Send current word state (with blanks for non-drawers)
         const isDrawer = player.isDrawer;
         socket.emit('game:word-selected', {
-          word: isDrawer ? room.gameState.currentWord : room.gameState.currentWord,
-          blanks: room.gameState.wordHints.join(' '),
-          hints: room.gameState.hintsRemaining,
-          drawTime: room.settings.roundTime,
+          word: isDrawer ? joinedRoom.gameState.currentWord : joinedRoom.gameState.currentWord,
+          blanks: joinedRoom.gameState.wordHints.join(' '),
+          hints: joinedRoom.gameState.hintsRemaining,
+          drawTime: joinedRoom.settings.roundTime,
           isRejoin: true
         });
         
-        // Send current timer
         socket.emit('game:timer-update', { 
-          timeRemaining: room.gameState.timeRemaining 
+          timeRemaining: joinedRoom.gameState.timeRemaining 
         });
         
-        // Send phase change to put them in the right UI state
         socket.emit('PHASE_CHANGE', {
-          phase: room.gameState.phase,
-          round: room.gameState.currentRound,
-          turn: room.gameState.currentTurn,
-          totalRounds: room.gameState.totalRounds,
-          drawerId: room.players[room.gameState.currentDrawerIndex]?.id
+          phase: joinedRoom.gameState.phase,
+          round: joinedRoom.gameState.currentRound,
+          turn: joinedRoom.gameState.currentTurn,
+          totalRounds: joinedRoom.gameState.totalRounds,
+          drawerId: joinedRoom.players[joinedRoom.gameState.currentDrawerIndex]?.id
         });
         
-        // If in drawing phase, send current canvas state if available
-        if (room.gameState.phase === 'drawing' && room.canvasState && room.canvasState.length > 0) {
+        if (joinedRoom.gameState.phase === 'drawing' && joinedRoom.canvasState && joinedRoom.canvasState.length > 0) {
           console.log('[room:join] Sending canvas state to rejoining player');
-          socket.emit('canvas:sync', { strokes: room.canvasState });
+          socket.emit('canvas:sync', { strokes: joinedRoom.canvasState });
         }
       }
 
-      
       // Notify others
-      socket.to(data.roomId).emit('room:player-joined', { player: { id: player.id, username: player.username, avatarId: player.avatarId, score: player.score, isDrawer: player.isDrawer, isHost: player.isHost } });
+      if (isRejoin) {
+        io.to(targetRoomId).emit('room:player-reconnected', {
+          playerId: player.id,
+          username: player.username,
+          connected: true
+        });
+      } else {
+        socket.to(targetRoomId).emit('room:player-joined', { 
+          player: { 
+            id: player.id, 
+            username: player.username, 
+            avatarId: player.avatarId, 
+            score: player.score, 
+            isDrawer: player.isDrawer, 
+            isHost: player.isHost,
+            connected: true
+          } 
+        });
+      }
       
       // Notify all clients that room list changed
       io.emit('room:updated');
       
-      logger.info('SOCKET', 'Player joined room successfully', { roomId: data.roomId, playerId: player.id, username: player.username });
-      console.log('[room:join] Player joined room successfully:', data.roomId);
+      logger.info('SOCKET', 'Player joined room successfully', { 
+        roomId: targetRoomId, 
+        playerId: player.id, 
+        username: player.username,
+        isRejoin 
+      });
+
     });
+
 
 
     socket.on('room:leave', () => {
-      handlePlayerLeave(socket, io, true); // true = intentional leave
+      const result = handleIntentionalLeave(socket.id);
+      
+      if (result.roomId) {
+        const { roomId, player, roomEmpty } = result;
+        
+        if (player) {
+          // Notify others
+          io.to(roomId).emit('room:player-left', { 
+            playerId: player.id,
+            username: player.username,
+            intentional: true
+          });
+          
+          // If host changed, notify
+          const room = getRoom(roomId);
+          if (room && room.players.length > 0) {
+            const newHost = room.players[0];
+            if (newHost.isHost && player.id !== newHost.id) {
+              io.to(roomId).emit('room:host-changed', { 
+                newHostId: newHost.id, 
+                newHostName: newHost.username 
+              });
+            }
+          }
+        }
+        
+        socket.leave(roomId);
+        io.emit('room:updated');
+        
+        logger.info('SOCKET', 'Player left room intentionally', { 
+          roomId, 
+          playerId: player?.id,
+          roomEmpty 
+        });
+      }
     });
+
 
     socket.on('room:start', () => {
       logger.socketEvent('room:start', socket.id, { action: 'game_start_request' });
@@ -1214,8 +1068,46 @@ export function setupSocketHandlers(io: Server) {
     socket.on('disconnect', () => {
       logger.socketEvent('disconnect', socket.id, { timestamp: new Date().toISOString() });
       console.log('[Socket] Client disconnected:', socket.id);
-      handlePlayerLeave(socket, io, false); // false = disconnect (grace period)
+      
+      const result = handleDisconnect(socket.id);
+      
+      if (result.roomId && result.player) {
+        const { roomId, userId, player, wasHost, wasDrawer } = result;
+        
+        // Notify others that player is offline (but may return)
+        io.to(roomId).emit('player:status', {
+          playerId: player.id,
+          username: player.username,
+          connected: false,
+          message: `${player.username} disconnected (reconnecting...)`,
+          reconnectWindow: 60000
+        });
+        
+        io.emit('room:updated');
+        
+        logger.info('SOCKET', 'Player disconnected, grace period started', {
+          roomId,
+          userId,
+          username: player.username,
+          wasHost,
+          wasDrawer
+        });
+        
+        // If drawer disconnected during drawing, handle special case
+        if (wasDrawer) {
+          const room = getRoom(roomId);
+          if (room && room.gameState.phase === 'drawing') {
+            io.to(roomId).emit('game:drawer-disconnected', {
+              playerId: player.id,
+              username: player.username,
+              message: `${player.username} disconnected! Round paused. Waiting for reconnection...`,
+              reconnectWindow: 90000
+            });
+          }
+        }
+      }
     });
+
   });
 }
 

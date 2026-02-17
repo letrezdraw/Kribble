@@ -1,186 +1,410 @@
-# Local Development Guide
+# Local Development Guide - Kribble
 
-This guide explains how to run the Kribble project locally for development without affecting production configurations.
+## 🎯 Quick Start (TL;DR)
 
-## Quick Start
-
-### 1. Start the Server
+Your project is **already configured** for local development! Just run:
 
 ```bash
+# Terminal 1 - Start Server
 cd server
-
-# Install dependencies (if not already done)
-npm install
-
-# The server will automatically use .env.development
 npm run dev
-```
 
-Server will start on `http://localhost:3001`
-
-### 2. Start the Client
-
-```bash
+# Terminal 2 - Start Client
 cd client
-
-# Install dependencies (if not already done)
-npm install
-
-# The client will automatically use .env.development
 npm run dev
 ```
 
-Client will start on `http://localhost:5173`
+Then open http://localhost:5173 in your browser.
 
-### 3. Open in Browser
+## ✅ Current Configuration Status
 
-Navigate to `http://localhost:5173`
+### What's Already Working
 
-The client will automatically connect to the local server at `http://localhost:3001`
+| Component | Status | Configuration |
+|-----------|--------|---------------|
+| API URL | ✅ | Uses `VITE_API_URL` env var, falls back to empty (proxy) |
+| Socket URL | ✅ | Uses `VITE_SOCKET_URL` env var, falls back to empty (proxy) |
+| CORS | ✅ | Server allows localhost:5173, 3000, 4173 |
+| Vite Proxy | ✅ | Auto-proxies /api and /socket.io to :3001 |
+| Type Definitions | ✅ | Vite env types defined in `vite-env.d.ts` |
 
-## Environment Files Explained
+### Files Already Configured
 
-### Client Environment Files
+1. **Client API** (`client/src/services/api.ts`):
+   ```typescript
+   const API_URL = import.meta.env.VITE_API_URL || '';
+   ```
 
-| File | Purpose | When Used |
-|------|---------|-----------|
-| `.env.development` | Local development settings | `npm run dev` |
-| `.env.production` | Production build settings | `npm run build` |
+2. **Client Socket** (`client/src/contexts/SocketContext.tsx`):
+   ```typescript
+   const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || '';
+   ```
 
-### Server Environment Files
+3. **Server CORS** (`server/src/index.ts`):
+   ```typescript
+   const corsOrigins = isProduction 
+     ? (process.env.CORS_ORIGIN ? [process.env.CORS_ORIGIN] : ['*'])
+     : ['http://localhost:5173', 'http://localhost:3000', ...];
+   ```
 
-| File | Purpose | When Used |
-|------|---------|-----------|
-| `.env.development` | Local development settings | `npm run dev` (when NODE_ENV=development) |
-| `.env.example` | Template for creating `.env` | Reference only |
+4. **Vite Config** (`client/vite.config.ts`):
+   ```typescript
+   server: {
+     proxy: {
+       '/api': { target: 'http://localhost:3001', changeOrigin: true },
+       '/socket.io': { target: 'http://localhost:3001', ws: true },
+     },
+   }
+   ```
 
-## How It Works
+## 🚀 Development Modes
 
-### Client (Vite)
+### Mode 1: Vite Proxy (Recommended - Simplest)
 
-Vite automatically loads environment files based on the current mode:
+**How it works:** Vite dev server proxies API calls to your backend automatically.
 
-- **Development mode** (`npm run dev`): Loads `.env.development`
-- **Production mode** (`npm run build`): Loads `.env.production`
+**Setup:**
+1. No environment files needed!
+2. Start server: `cd server && npm run dev` (port 3001)
+3. Start client: `cd client && npm run dev` (port 5173)
+4. Open http://localhost:5173
 
-The client uses these variables:
-- `VITE_API_URL`: Base URL for API requests
-- `VITE_SOCKET_URL`: Base URL for Socket.io connections
+**Pros:**
+- ✅ Zero configuration
+- ✅ No CORS issues
+- ✅ Hot reload works perfectly
+- ✅ Same as production paths
 
-### Server (Node.js)
+**Cons:**
+- ❌ Can't test on mobile devices on same network
+- ❌ Can't run client and server on different machines
 
-The server uses `dotenv` to load environment variables. In development, it will use `.env.development`.
+### Mode 2: Explicit URLs (For Mobile/Network Testing)
 
-The server uses these variables:
-- `PORT`: Server port (default: 3001)
-- `DATABASE_URL`: Database connection string
-- `JWT_SECRET`: Secret for JWT tokens
-- `CORS_ORIGIN`: Allowed frontend origin
+**How it works:** Set explicit URLs to connect to server.
 
-## Customizing Ports
+**Setup:**
+1. Create `client/.env.local`:
+   ```env
+   VITE_API_URL=http://localhost:3001
+   VITE_SOCKET_URL=http://localhost:3001
+   ```
 
-### Change Server Port
+2. Start services as normal
 
-Edit `server/.env.development`:
-```env
-PORT=3002
-```
+3. For mobile testing, use your IP:
+   ```env
+   VITE_API_URL=http://192.168.1.100:3001
+   VITE_SOCKET_URL=http://192.168.1.100:3001
+   ```
 
-Then update `client/.env.development`:
-```env
-VITE_API_URL=http://localhost:3002
-VITE_SOCKET_URL=http://localhost:3002
-```
+**Pros:**
+- ✅ Works across network (mobile testing)
+- ✅ Can run on different machines
+- ✅ More explicit control
 
-### Change Client Port
+**Cons:**
+- ❌ Need to manage environment files
+- ❌ CORS must be properly configured
+- ❌ Must restart Vite after changes
 
-Edit `client/package.json` and modify the dev script:
-```json
-"dev": "vite --port 3000"
-```
+### Mode 3: Production Build Locally
 
-Then update `server/.env.development`:
-```env
-CORS_ORIGIN=http://localhost:3000
-```
+**How it works:** Build client and serve from server (true production simulation).
 
-## Common Issues
-
-### CORS Errors
-
-If you see CORS errors in the browser console:
-
-1. Check that `CORS_ORIGIN` in `server/.env.development` matches your client URL
-2. Ensure the server was restarted after changing `.env` files
-
-### Connection Refused
-
-If the client can't connect to the server:
-
-1. Verify the server is running: `curl http://localhost:3001/api/health`
-2. Check that `VITE_API_URL` in `client/.env.development` matches the server port
-3. Restart both client and server after changing environment files
-
-### Environment Variables Not Loading
-
-If changes to `.env` files don't take effect:
-
-1. **Client**: Restart the Vite dev server (`npm run dev`)
-2. **Server**: Restart the Node.js server
-
-## Production vs Development
-
-### Development (Local)
-- SQLite database (local file)
-- Separate client and server ports
-- Debug logging enabled
-- CORS allows localhost
-
-### Production (Render/Railway)
-- PostgreSQL database
-- Same-origin requests (client served by server)
-- Debug logging disabled
-- CORS configured for production domain
-
-## Switching Between Environments
-
-### To test production build locally:
-
-1. Build the client:
+**Setup:**
+1. Build client:
    ```bash
    cd client
    npm run build
    ```
 
-2. The server will serve the built client from `client/dist`
-
-3. Start the server in production mode:
+2. Start server in production mode:
    ```bash
    cd server
    NODE_ENV=production npm start
    ```
 
-4. Access at `http://localhost:3001`
+3. Open http://localhost:3001
 
-## Security Notes
+**Pros:**
+- ✅ Exact production behavior
+- ✅ Tests production build
+- ✅ No CORS issues (same-origin)
 
-- **Never commit `.env` files** with real secrets
-- `.env.example` files are safe to commit (they contain templates)
-- `.env.development` and `.env.production` are tracked in git for convenience
-- For production, always use environment variables set in your hosting platform (Render, Railway, etc.)
+**Cons:**
+- ❌ No hot reload
+- ❌ Must rebuild after changes
+- ❌ Slower development cycle
 
-## Troubleshooting Checklist
+## 🔧 Environment Files Reference
 
-- [ ] Server is running (`npm run dev` in server directory)
-- [ ] Client is running (`npm run dev` in client directory)
-- [ ] Ports match between client and server config
-- [ ] CORS origin is correctly set
-- [ ] No other services using the same ports
-- [ ] Environment files are properly formatted (no spaces around `=`)
+### Client Environment Files
 
-## Need Help?
+| File | Purpose | Commit to Git? |
+|------|---------|----------------|
+| `.env.development` | Dev defaults (empty = use proxy) | ✅ Yes |
+| `.env.production` | Production defaults (empty = same-origin) | ✅ Yes |
+| `.env.local` | Local overrides (your machine only) | ❌ No |
+| `.env.development.local` | Dev-specific overrides | ❌ No |
 
-Check the logs:
-- Server logs appear in the terminal where you ran `npm run dev`
-- Client logs appear in the browser console (F12 → Console)
-- Network requests can be debugged in browser DevTools → Network tab
+### Server Environment Variables
+
+Create `server/.env` (not committed):
+```env
+# Server
+PORT=3001
+NODE_ENV=development
+
+# Database
+DATABASE_URL=./data/kribble.db
+
+# Auth
+JWT_SECRET=your-secret-key-here
+
+# Optional: Redis (for new features)
+REDIS_URL=redis://localhost:6379
+
+# Optional: CORS override
+# CORS_ORIGIN=http://localhost:5173
+```
+
+## 🐛 Troubleshooting
+
+### Problem: "Cannot connect to server"
+
+**Symptoms:** API calls fail, socket won't connect, CORS errors
+
+**Checklist:**
+
+1. **Is server running?**
+   ```bash
+   curl http://localhost:3001/api/health
+   # Should return: {"status":"ok",...}
+   ```
+
+2. **Check server logs:**
+   - Look for "Server running on port 3001"
+   - Look for CORS origins list
+
+3. **Check browser console:**
+   - CORS errors = server not allowing your origin
+   - Connection refused = server not running
+   - 404 errors = wrong API path
+
+4. **Verify ports:**
+   - Server should be on :3001
+   - Client should be on :5173
+   - No other services using these ports
+
+### Problem: "Still connecting to production"
+
+**Symptoms:** API calls go to render.com or railway.app
+
+**Solutions:**
+
+1. **Clear browser cache:**
+   - DevTools > Network > Disable cache (checkmark)
+   - Or hard refresh: Ctrl+Shift+R (Windows) / Cmd+Shift+R (Mac)
+
+2. **Check environment files:**
+   ```bash
+   # Should be empty or localhost
+   cat client/.env.local
+   cat client/.env.development.local
+   ```
+
+3. **Clear localStorage:**
+   ```javascript
+   // In browser console
+   localStorage.clear();
+   location.reload();
+   ```
+
+4. **Restart Vite:**
+   - Stop client dev server
+   - Start again: `npm run dev`
+
+5. **Check for hardcoded URLs in your code:**
+   ```bash
+   grep -r "onrender.com\|railway.app" client/src/
+   ```
+
+### Problem: "CORS errors in browser"
+
+**Symptoms:** Requests blocked, CORS policy errors
+
+**Solutions:**
+
+1. **Verify server CORS config:**
+   - Check `server/src/index.ts` includes your client URL
+   - Default includes: 5173, 3000, 4173
+
+2. **If using custom port:**
+   ```typescript
+   // Add to server/src/index.ts
+   : ['http://localhost:5173', 'http://localhost:3000', 
+      'http://localhost:YOUR_PORT', ...]
+   ```
+
+3. **If using explicit URLs (Mode 2):**
+   - Ensure `VITE_API_URL` matches server port
+   - Check server is actually running on that port
+
+### Problem: "Mobile device can't connect"
+
+**Symptoms:** Works on computer, fails on phone/tablet
+
+**Solutions:**
+
+1. **Use Mode 2 (Explicit URLs):**
+   ```env
+   # client/.env.local
+   VITE_API_URL=http://YOUR_COMPUTER_IP:3001
+   VITE_SOCKET_URL=http://YOUR_COMPUTER_IP:3001
+   ```
+
+2. **Find your IP:**
+   ```bash
+   # Windows
+   ipconfig
+   
+   # Mac/Linux
+   ifconfig | grep "inet "
+   ```
+
+3. **Ensure same network:**
+   - Computer and mobile must be on same WiFi
+   - Test: `ping YOUR_COMPUTER_IP` from another device
+
+4. **Check firewall:**
+   - Allow Node.js through Windows Firewall
+   - Temporarily disable firewall for testing
+
+## 📱 Mobile Development Tips
+
+### Using the Mobile Tunnel Script
+
+The project includes a PowerShell script for mobile testing:
+
+```bash
+# Run from project root
+./scripts/mobile-tunnel.ps1
+```
+
+This creates a tunnel to expose your local server publicly.
+
+### Manual Mobile Testing
+
+1. **Get your computer's IP address** (e.g., 192.168.1.100)
+
+2. **Create `client/.env.local`:**
+   ```env
+   VITE_API_URL=http://192.168.1.100:3001
+   VITE_SOCKET_URL=http://192.168.1.100:3001
+   ```
+
+3. **Update server CORS** (if needed):
+   ```typescript
+   : ['http://localhost:5173', 'http://192.168.1.100:5173', ...]
+   ```
+
+4. **Start services:**
+   ```bash
+   cd server && npm run dev
+   cd client && npm run dev
+   ```
+
+5. **On mobile device:**
+   - Open http://192.168.1.100:5173
+   - Or use the network IP shown in Vite startup
+
+## 🔍 Verifying Your Setup
+
+Run this checklist:
+
+```bash
+# 1. Server health check
+curl http://localhost:3001/api/health
+
+# 2. Check server CORS config
+# (Look in server console output for "CORS origins:")
+
+# 3. Check client env
+cd client
+npm run dev
+# Look for "Local: http://localhost:5173" in output
+
+# 4. Browser check
+# Open http://localhost:5173
+# Open DevTools > Network
+# Verify API calls go to :3001 (or same origin if using proxy)
+```
+
+## 🎓 Understanding the Architecture
+
+```
+┌─────────────────┐         ┌─────────────────┐
+│   Client (Vite) │         │  Server (Node)  │
+│   localhost:5173│         │  localhost:3001 │
+│                 │         │                 │
+│  ┌───────────┐  │         │  ┌───────────┐  │
+│  │  React    │  │◄────────►│  │  Express  │  │
+│  │  (UI)     │  │  Proxy   │  │  (API)    │  │
+│  └───────────┘  │  /api    │  └───────────┘  │
+│                 │  /socket │                 │
+│  ┌───────────┐  │         │  ┌───────────┐  │
+│  │  Socket   │◄─┼─────────┼──┤  Socket   │  │
+│  │  .io      │  │ WebSocket│  │  .io      │  │
+│  └───────────┘  │         │  └───────────┘  │
+└─────────────────┘         └─────────────────┘
+         │
+         │ Hot Reload
+         ▼
+   Vite Dev Server
+```
+
+## 📝 Common Commands
+
+```bash
+# Start development (Proxy Mode)
+cd server && npm run dev
+cd client && npm run dev
+
+# Start with explicit URLs (Mode 2)
+# (Create .env.local first)
+cd server && npm run dev
+cd client && npm run dev
+
+# Build for production
+cd client && npm run build
+cd server && NODE_ENV=production npm start
+
+# Test production build locally
+cd client && npm run build
+cd server && npm start
+# Open http://localhost:3001
+
+# Clear everything and restart
+cd client && rm -rf node_modules dist && npm install
+cd server && rm -rf node_modules data && npm install
+```
+
+## ✅ Summary
+
+Your project is **already properly configured** for local development:
+
+- ✅ No hardcoded production URLs
+- ✅ Environment-based configuration
+- ✅ Vite proxy for seamless development
+- ✅ CORS configured for common ports
+- ✅ Type definitions in place
+- ✅ Documentation complete
+
+**If you're still having issues**, they're likely due to:
+1. Cached browser data (clear cache/localStorage)
+2. Server not running on expected port
+3. Custom code with hardcoded URLs (check your additions)
+4. Firewall/network issues (for mobile testing)
+
+**The URL configuration is complete and working!** 🚀

@@ -11,6 +11,9 @@ export interface Player {
   isHost: boolean;
   hasGuessedCorrectly?: boolean;
   disconnected?: boolean;
+  // Connection state tracking
+  connected?: boolean;
+  lastSeen?: number;
   // Enhanced reconnection fields
   disconnectedAt?: number;
   wasDrawing?: boolean;
@@ -19,6 +22,7 @@ export interface Player {
   drawingData?: any;
   hasDrawnThisRound?: boolean; // Track if player has drawn in current round
 }
+
 
 
 

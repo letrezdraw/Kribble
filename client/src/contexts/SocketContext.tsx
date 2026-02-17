@@ -23,12 +23,12 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     // Use environment variable for socket URL (set in .env.development or .env.production)
-    // Falls back to empty string for same-origin requests in production
+    // Empty string means same-origin (works with Vite proxy in dev, Express in production)
     const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || '';
 
-
-
     const newSocket = io(SOCKET_URL, {
+
+
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 5,
