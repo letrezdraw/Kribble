@@ -1,6 +1,8 @@
 import { useEffect, useCallback, useRef } from 'react';
 import type { Stroke, ToolType, Point } from '../types';
 import { drawStroke, redrawAllStrokes, clearCanvas } from '../drawingTools';
+import { decodeMessage, expandStroke } from '@kribble/shared';
+
 
 export interface UseSocketEventsOptions {
 
@@ -79,6 +81,31 @@ export function useSocketEvents({
       drawStroke(staticCtxRef.current!, data.stroke);
     };
 
+    const handleDrawStrokeBinary = (buffer: Uint8Array) => {
+      try {
+        const decoded = decodeMessage<{ playerId: string; stroke: (string | number)[] }>(buffer);
+        if (decoded.playerId === socket.id) return;
+        
+        const expanded = expandStroke(decoded.stroke);
+        // Map expanded properties to Stroke type (width -> size)
+        const stroke: Stroke = {
+          id: expanded.id,
+          tool: expanded.tool as Stroke['tool'],
+          points: expanded.points,
+          color: expanded.color,
+          size: expanded.width, // Map width to size
+          opacity: expanded.opacity,
+          timestamp: Date.now(),
+        };
+        canvasStateRef.current.strokes.push(stroke);
+        drawStroke(staticCtxRef.current!, stroke);
+      } catch (error) {
+        console.error('Failed to decode binary stroke:', error);
+      }
+    };
+
+
+
     const handleDrawStrokeChunk = (data: { playerId: string; points: Point[]; tool: ToolType; color: string; size: number }) => {
       if (data.playerId === socket.id) return;
       if (liveCtxRef.current) {
@@ -131,7 +158,9 @@ export function useSocketEvents({
     };
 
     socket.on('draw:stroke', handleDrawStroke);
+    socket.on('draw:stroke:binary', handleDrawStrokeBinary);
     socket.on('draw:stroke:chunk', handleDrawStrokeChunk);
+
     socket.on('draw:clear', handleDrawClear);
     socket.on('game:round:end', handleGameRoundEnd);
     socket.on('draw:undo', handleDrawUndo);
@@ -140,7 +169,9 @@ export function useSocketEvents({
 
     return () => {
       socket.off('draw:stroke', handleDrawStroke);
+      socket.off('draw:stroke:binary', handleDrawStrokeBinary);
       socket.off('draw:stroke:chunk', handleDrawStrokeChunk);
+
       socket.off('draw:clear', handleDrawClear);
       socket.off('game:round:end', handleGameRoundEnd);
       socket.off('draw:undo', handleDrawUndo);

@@ -1,45 +1,47 @@
 {
-  "users": [
-    [
-      "cec4ae9c-8bd5-4aee-9f84-b51982100aa2",
-      {
-        "id": "cec4ae9c-8bd5-4aee-9f84-b51982100aa2",
-        "username": "letrezdraw",
-        "email": "sohamgamercc@gmail.com",
-        "password": "$2a$10$BKiQagaICHfNZoiOitxHnewfXGPZiSJmwqbdzQmGffLxPxYU8XX8m",
-        "avatar_id": "👤",
-        "level": 1,
-        "xp": 0,
-        "created_at": "2026-02-14T05:41:07.948Z"
-      }
-    ],
-    [
-      "48221f61-825c-4331-bbe7-b2c05ff5d348",
-      {
-        "id": "48221f61-825c-4331-bbe7-b2c05ff5d348",
-        "username": "soham",
-        "email": "sohamgajare96@gmail.com",
-        "password": "$2a$10$cqf5eqvV0zgmyVlJMPurvuPUEdqPFecl0ENR1EmmYvvutxm315AFq",
-        "avatar_id": "👤",
-        "level": 1,
-        "xp": 0,
-        "created_at": "2026-02-14T05:41:21.727Z"
-      }
-    ],
-    [
-      "abc98d67-1cee-41c5-94a1-1d7b840fe716",
-      {
-        "id": "abc98d67-1cee-41c5-94a1-1d7b840fe716",
-        "username": "rez",
-        "email": "rezoxx69@gmail.com",
-        "password": "$2a$10$LuNrRXvBvjzEWC/rRkzKVOb26jMny3z5CEDRAKaaA.fBtxxIRKL.C",
-        "avatar_id": "👤",
-        "level": 1,
-        "xp": 0,
-        "created_at": "2026-02-14T09:47:42.209Z"
-      }
-    ]
-  ],
+  "users": {
+    "bc1f816e-15b1-499a-935e-f0de63eb4ccd": {
+      "id": "bc1f816e-15b1-499a-935e-f0de63eb4ccd",
+      "username": "letrezdraw",
+      "email": "letrezdraw@gmail.com",
+      "password": "$2a$10$QQmFZ13VUNnVsAUZqMEdg.IxKkZYadAzPF3vRCdsKzLqXqUskHvfW",
+      "avatar_id": "👤",
+      "level": 1,
+      "xp": 0,
+      "created_at": "2026-02-17T21:18:43.094Z",
+      "settings": "{\"theme\":\"dark\",\"sound\":true,\"music\":true,\"notifications\":true,\"emailNotifications\":true,\"profilePublic\":true,\"chatEnabled\":true,\"language\":\"en\",\"haptic\":true,\"gameInvites\":true,\"friendRequests\":true}"
+    },
+    "cec4ae9c-8bd5-4aee-9f84-b51982100aa2": {
+      "id": "cec4ae9c-8bd5-4aee-9f84-b51982100aa2",
+      "username": "letrezdraw",
+      "email": "sohamgamercc@gmail.com",
+      "password": "$2a$10$BKiQagaICHfNZoiOitxHnewfXGPZiSJmwqbdzQmGffLxPxYU8XX8m",
+      "avatar_id": "👤",
+      "level": 1,
+      "xp": 0,
+      "created_at": "2026-02-14T05:41:07.948Z"
+    },
+    "48221f61-825c-4331-bbe7-b2c05ff5d348": {
+      "id": "48221f61-825c-4331-bbe7-b2c05ff5d348",
+      "username": "soham",
+      "email": "sohamgajare96@gmail.com",
+      "password": "$2a$10$cqf5eqvV0zgmyVlJMPurvuPUEdqPFecl0ENR1EmmYvvutxm315AFq",
+      "avatar_id": "👤",
+      "level": 1,
+      "xp": 0,
+      "created_at": "2026-02-14T05:41:21.727Z"
+    },
+    "abc98d67-1cee-41c5-94a1-1d7b840fe716": {
+      "id": "abc98d67-1cee-41c5-94a1-1d7b840fe716",
+      "username": "rez",
+      "email": "rezoxx69@gmail.com",
+      "password": "$2a$10$LuNrRXvBvjzEWC/rRkzKVOb26jMny3z5CEDRAKaaA.fBtxxIRKL.C",
+      "avatar_id": "👤",
+      "level": 1,
+      "xp": 0,
+      "created_at": "2026-02-14T09:47:42.209Z"
+    }
+  },
   "wordCategories": [
     [
       "animals",

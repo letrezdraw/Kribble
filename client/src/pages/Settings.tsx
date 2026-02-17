@@ -20,6 +20,8 @@ const DEFAULT_SETTINGS = {
   chatEnabled: true,
   language: 'en',
   haptic: true,
+  gameInvites: true,
+  friendRequests: true,
 };
 
 // Load settings from localStorage
@@ -35,7 +37,6 @@ const loadSettings = () => {
   return DEFAULT_SETTINGS;
 };
 
-
 // Save settings to localStorage
 const saveSettingsToStorage = (settings: typeof DEFAULT_SETTINGS) => {
   try {
@@ -45,6 +46,62 @@ const saveSettingsToStorage = (settings: typeof DEFAULT_SETTINGS) => {
   }
 };
 
+// Apply theme to document
+const applyTheme = (theme: string) => {
+  document.documentElement.setAttribute('data-theme', theme);
+  if (theme === 'dark') {
+    document.body.style.background = 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)';
+  } else {
+    document.body.style.background = 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)';
+  }
+};
+
+// Apply sound setting
+const applySound = (enabled: boolean) => {
+  window.__SOUND_ENABLED__ = enabled;
+};
+
+// Apply music setting
+const applyMusic = (enabled: boolean) => {
+  window.__MUSIC_ENABLED__ = enabled;
+  const audio = document.getElementById('bg-music') as HTMLAudioElement;
+  if (audio) {
+    if (enabled) {
+      audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  }
+};
+
+// Apply haptic setting
+const applyHaptic = (enabled: boolean) => {
+  window.__HAPTIC_ENABLED__ = enabled;
+};
+
+// Apply chat setting
+const applyChat = (enabled: boolean) => {
+  window.__CHAT_ENABLED__ = enabled;
+  document.body.setAttribute('data-chat-enabled', String(enabled));
+};
+
+// Apply notifications setting
+const applyNotifications = (enabled: boolean) => {
+  if (enabled && 'Notification' in window) {
+    Notification.requestPermission();
+  }
+  window.__NOTIFICATIONS_ENABLED__ = enabled;
+};
+
+// Apply all settings
+const applyAllSettings = (settings: typeof DEFAULT_SETTINGS) => {
+  applyTheme(settings.theme);
+  applySound(settings.sound);
+  applyMusic(settings.music);
+  applyHaptic(settings.haptic);
+  applyChat(settings.chatEnabled);
+  applyNotifications(settings.notifications);
+};
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -65,6 +122,16 @@ export default function Settings() {
     };
   });
 
+  // Password change state
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Apply settings on mount
+  useEffect(() => {
+    applyAllSettings(settings);
+  }, []);
+
   // Load settings from API on mount
   useEffect(() => {
     const fetchSettings = async () => {
@@ -74,17 +141,18 @@ export default function Settings() {
       try {
         const response = await api.get(`/users/${user.id}/settings`);
         if (response.data.settings) {
-          setSettings((prev: typeof DEFAULT_SETTINGS) => ({
-            ...prev,
+          const newSettings = {
+            ...settings,
             ...response.data.settings,
-            username: user?.username || prev.username,
-            email: user?.email || prev.email,
-          }));
+            username: user?.username || settings.username,
+            email: user?.email || settings.email,
+          };
+          setSettings(newSettings);
+          applyAllSettings(newSettings);
         }
       } catch (err: any) {
         // Silently handle API error - fall back to localStorage
       } finally {
-
         setLoading(false);
       }
     };
@@ -95,6 +163,7 @@ export default function Settings() {
   // Persist settings to localStorage whenever they change
   useEffect(() => {
     saveSettingsToStorage(settings);
+    applyAllSettings(settings);
   }, [settings]);
 
   const handleSave = async () => {
@@ -105,6 +174,9 @@ export default function Settings() {
     try {
       // Save to localStorage first
       saveSettingsToStorage(settings);
+      
+      // Apply all settings immediately
+      applyAllSettings(settings);
       
       // Save to API if user is logged in
       if (user?.id) {
@@ -119,6 +191,8 @@ export default function Settings() {
             chatEnabled: settings.chatEnabled,
             language: settings.language,
             haptic: settings.haptic,
+            gameInvites: settings.gameInvites,
+            friendRequests: settings.friendRequests,
           }
         });
       }
@@ -127,6 +201,59 @@ export default function Settings() {
       setTimeout(() => setSuccess(''), 3000);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handlePasswordChange = async () => {
+    if (!currentPassword || !newPassword) {
+      setError('Please enter both current and new password');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setError('New password must be at least 6 characters');
+      return;
+    }
+    
+    setSaving(true);
+    setError('');
+    setSuccess('');
+    
+    try {
+      await api.put('/auth/password', {
+        currentPassword,
+        newPassword
+      });
+      setSuccess('Password changed successfully!');
+      setCurrentPassword('');
+      setNewPassword('');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to change password');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!showDeleteConfirm) {
+      setShowDeleteConfirm(true);
+      return;
+    }
+    
+    setSaving(true);
+    setError('');
+    
+    try {
+      await api.delete('/auth/account');
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      localStorage.removeItem('kribble_settings');
+      navigate('/');
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to delete account');
+      setShowDeleteConfirm(false);
     } finally {
       setSaving(false);
     }
@@ -201,12 +328,26 @@ export default function Settings() {
                 <input 
                   type="password" 
                   placeholder="Current password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
                   style={{ marginBottom: '12px' }}
                 />
                 <input 
                   type="password" 
                   placeholder="New password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  style={{ marginBottom: '12px' }}
                 />
+                <Button 
+                  variant="secondary" 
+                  onClick={handlePasswordChange}
+                  loading={saving}
+                  disabled={saving || !currentPassword || !newPassword}
+                  style={{ width: '100%' }}
+                >
+                  Update Password
+                </Button>
               </div>
 
               {error && <div className="error-message" style={{ marginBottom: '16px' }}>{error}</div>}
@@ -276,21 +417,31 @@ export default function Settings() {
 
               <div className="form-group" style={{ marginTop: '24px' }}>
                 <label>Language</label>
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'space-between',
-                  padding: '16px',
-                  background: 'rgba(255,255,255,0.05)',
-                  borderRadius: '12px',
-                  border: '1px solid rgba(255,255,255,0.1)'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <Globe size={20} color="rgba(255,255,255,0.6)" />
-                    <span>English</span>
-                  </div>
-                  <ChevronRight size={20} color="rgba(255,255,255,0.4)" />
-                </div>
+                <select
+                  value={settings.language}
+                  onChange={(e) => setSettings({ ...settings, language: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '16px',
+                    background: 'rgba(255,255,255,0.05)',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    color: 'white',
+                    fontSize: '1rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <option value="en" style={{ background: '#1a1a2e' }}>English</option>
+                  <option value="es" style={{ background: '#1a1a2e' }}>Spanish</option>
+                  <option value="fr" style={{ background: '#1a1a2e' }}>French</option>
+                  <option value="de" style={{ background: '#1a1a2e' }}>German</option>
+                  <option value="it" style={{ background: '#1a1a2e' }}>Italian</option>
+                  <option value="pt" style={{ background: '#1a1a2e' }}>Portuguese</option>
+                  <option value="ru" style={{ background: '#1a1a2e' }}>Russian</option>
+                  <option value="zh" style={{ background: '#1a1a2e' }}>Chinese</option>
+                  <option value="ja" style={{ background: '#1a1a2e' }}>Japanese</option>
+                  <option value="ko" style={{ background: '#1a1a2e' }}>Korean</option>
+                </select>
               </div>
 
               {error && <div className="error-message" style={{ marginBottom: '16px' }}>{error}</div>}
@@ -346,14 +497,37 @@ export default function Settings() {
                 <p style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.7)', marginBottom: '16px' }}>
                   These actions cannot be undone.
                 </p>
-                <Button variant="secondary" style={{ 
-                  width: '100%',
-                  background: 'rgba(241, 91, 181, 0.2)',
-                  color: '#F15BB5',
-                  borderColor: 'rgba(241, 91, 181, 0.3)'
-                }}>
-                  Delete Account
+                {showDeleteConfirm && (
+                  <p style={{ fontSize: '0.85rem', color: '#F15BB5', marginBottom: '12px', fontWeight: 600 }}>
+                    ⚠️ Are you sure? This will permanently delete your account!
+                  </p>
+                )}
+                <Button 
+                  variant="secondary" 
+                  onClick={handleDeleteAccount}
+                  loading={saving}
+                  disabled={saving}
+                  style={{ 
+                    width: '100%',
+                    background: showDeleteConfirm ? 'rgba(239, 68, 68, 0.3)' : 'rgba(241, 91, 181, 0.2)',
+                    color: showDeleteConfirm ? '#ef4444' : '#F15BB5',
+                    borderColor: showDeleteConfirm ? 'rgba(239, 68, 68, 0.5)' : 'rgba(241, 91, 181, 0.3)'
+                  }}
+                >
+                  {showDeleteConfirm ? 'Click again to confirm deletion' : 'Delete Account'}
                 </Button>
+                {showDeleteConfirm && (
+                  <Button 
+                    variant="ghost" 
+                    onClick={() => setShowDeleteConfirm(false)}
+                    style={{ 
+                      width: '100%',
+                      marginTop: '8px'
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                )}
               </div>
 
               {error && <div className="error-message" style={{ marginBottom: '16px' }}>{error}</div>}
@@ -401,7 +575,8 @@ export default function Settings() {
                   <p>Get notified when invited to a game</p>
                 </div>
                 <button 
-                  className={`toggle-switch active`}
+                  className={`toggle-switch ${settings.gameInvites ? 'active' : ''}`}
+                  onClick={() => setSettings({ ...settings, gameInvites: !settings.gameInvites })}
                 >
                   <span className="toggle-knob"></span>
                 </button>
@@ -413,7 +588,8 @@ export default function Settings() {
                   <p>Get notified of new friend requests</p>
                 </div>
                 <button 
-                  className={`toggle-switch active`}
+                  className={`toggle-switch ${settings.friendRequests ? 'active' : ''}`}
+                  onClick={() => setSettings({ ...settings, friendRequests: !settings.friendRequests })}
                 >
                   <span className="toggle-knob"></span>
                 </button>
@@ -431,4 +607,15 @@ export default function Settings() {
       </main>
     </div>
   );
+}
+
+// Add global type declarations
+declare global {
+  interface Window {
+    __SOUND_ENABLED__: boolean;
+    __MUSIC_ENABLED__: boolean;
+    __HAPTIC_ENABLED__: boolean;
+    __CHAT_ENABLED__: boolean;
+    __NOTIFICATIONS_ENABLED__: boolean;
+  }
 }

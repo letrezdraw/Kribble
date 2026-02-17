@@ -258,6 +258,10 @@ export default function DrawingCanvas({
     const onKeyDown = (e: KeyboardEvent) => {
       handleKeyDown(e);
 
+      // Only process drawing shortcuts if user is a drawer
+      // Non-drawers (guessers) should not trigger canvas actions
+      if (!isDrawer) return;
+
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
       for (const shortcut of shortcuts) {
@@ -279,7 +283,8 @@ export default function DrawingCanvas({
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [shortcutContext, handleKeyDown, handleKeyUp]);
+  }, [shortcutContext, handleKeyDown, handleKeyUp, isDrawer]);
+
 
   // Add text to canvas
   const addText = useCallback((x: number, y: number, text: string) => {

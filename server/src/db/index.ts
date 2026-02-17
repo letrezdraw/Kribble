@@ -32,6 +32,20 @@ class FileDB {
       if (existsSync(this.dataPath)) {
         const content = readFileSync(this.dataPath, 'utf-8');
         this.data = JSON.parse(content);
+        
+        // Migrate users from array format to object format if needed
+        if (Array.isArray(this.data.users)) {
+          const usersObj: any = {};
+          for (const item of this.data.users) {
+            if (Array.isArray(item) && item.length === 2) {
+              const [id, user] = item;
+              usersObj[id] = user;
+            }
+          }
+          this.data.users = usersObj;
+          console.log('[DB] Migrated users from array to object format');
+        }
+        
         // Ensure all required properties exist
         this.data.users = this.data.users || {};
         this.data.word_categories = this.data.word_categories || {};
@@ -39,6 +53,9 @@ class FileDB {
         this.data.match_history = this.data.match_history || [];
         this.data.daily_challenges = this.data.daily_challenges || {};
         this.data.achievements = this.data.achievements || {};
+        
+        // Save migrated data
+        this.save();
       } else {
         this.data = {
           users: {},
@@ -55,6 +72,7 @@ class FileDB {
       this.data = { users: {}, word_categories: {}, player_stats: {}, match_history: [], daily_challenges: {}, achievements: {} };
     }
   }
+
 
   
   private save() {
@@ -157,6 +175,7 @@ class FileDB {
         if (lowerSql.includes('update users')) {
           const userId = params[params.length - 1];
           if (this.data.users[userId]) {
+            if (lowerSql.includes('password')) this.data.users[userId].password = params[0];
             if (lowerSql.includes('username')) this.data.users[userId].username = params[0];
             if (lowerSql.includes('avatar_id')) this.data.users[userId].avatar_id = params[0];
             if (lowerSql.includes('settings')) this.data.users[userId].settings = params[0];
@@ -215,6 +234,20 @@ class FileDB {
           this.save();
           return { lastInsertRowid: 1, changes: 1 };
         }
+        if (lowerSql.includes('delete from users')) {
+          const userId = params[0];
+          if (this.data.users[userId]) {
+            delete this.data.users[userId];
+            // Also clean up related data
+            delete this.data.player_stats[userId];
+            delete this.data.achievements[userId];
+            // Remove user's match history
+            this.data.match_history = this.data.match_history.filter((m: any) => m.user_id !== userId);
+            this.save();
+            return { changes: 1 };
+          }
+          return { changes: 0 };
+        }
         return { lastInsertRowid: 1, changes: 1 };
       }
     };
@@ -228,6 +261,8 @@ class FileDB {
 
 // FileDB instance for development
 let fileDb: FileDB | null = null;
+
+
 
 // Initialize PostgreSQL
 async function initPostgres() {
@@ -271,6 +306,8 @@ async function initFileDB() {
   return fileDb;
 }
 
+
+
 // Initialize database
 export async function initDatabase() {
   console.log('[DB] Initializing database...');
@@ -283,6 +320,8 @@ export async function initDatabase() {
       await initFileDB();
     }
 
+
+
     
     // Run migrations with timeout
     const migrationPromise = (async () => {
@@ -290,6 +329,8 @@ export async function initDatabase() {
       await runMigrations(isPostgres ? pgPool : fileDb, isPostgres);
       await seedDefaultCategories(isPostgres ? pgPool : fileDb, isPostgres);
     })();
+
+
     
     const migrationTimeout = new Promise((_, reject) => 
       setTimeout(() => reject(new Error('Database migration timeout')), 30000)
@@ -309,6 +350,8 @@ export async function initDatabase() {
       await seedDefaultCategories(fileDb, false);
       console.log('[DB] FileDB fallback ready');
     } else {
+
+
       throw error;
     }
   }
@@ -338,6 +381,8 @@ export async function query(sql: string, params: any[] = []): Promise<any> {
       return fileDb!.prepare(sql).run(...params);
     }
   }
+
+
 }
 
 export async function queryOne(sql: string, params: any[] = []): Promise<any> {
@@ -364,6 +409,8 @@ export async function run(sql: string, params: any[] = []): Promise<{ lastID?: n
       changes: result.changes
     };
   }
+
+
 }
 
 // Legacy db interface for compatibility
@@ -388,6 +435,8 @@ export const db = {
       // FileDB uses sync interface
       return fileDb!.prepare(sql);
     }
+
+
   },
   exec: async (sql: string) => {
     if (isPostgres) {
@@ -395,6 +444,8 @@ export const db = {
     } else {
       fileDb!.exec(sql);
     }
+
+
   }
 };
 

@@ -299,16 +299,98 @@ router.put('/profile', async (req: Request, res: Response) => {
 
 
 
+// Change password
+router.put('/password', async (req: Request, res: Response) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ message: 'Not authenticated' });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'Current password and new password are required' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: 'New password must be at least 6 characters' });
+    }
+
+    // Get user with password
+    const user = await db.prepare('SELECT id, password FROM users WHERE id = ?').get(decoded.userId) as {
+      id: string;
+      password: string;
+    } | undefined;
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Verify current password
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      logger.warn('AUTH', 'Password change failed: Invalid current password', { userId: decoded.userId });
+      return res.status(401).json({ message: 'Current password is incorrect' });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update password
+    await db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashedPassword, decoded.userId);
+
+    logger.userAction(decoded.userId, 'PASSWORD_CHANGED', {}, req.ip);
+    res.json({ message: 'Password updated successfully' });
+  } catch (error) {
+    logger.error('AUTH', 'Password change error', error as Error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Delete account
+router.delete('/account', async (req: Request, res: Response) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ message: 'Not authenticated' });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
+
+    // Delete user (cascade will handle related data)
+    await db.prepare('DELETE FROM users WHERE id = ?').run(decoded.userId);
+
+    logger.userAction(decoded.userId, 'ACCOUNT_DELETED', {}, req.ip);
+    res.json({ message: 'Account deleted successfully' });
+  } catch (error) {
+    logger.error('AUTH', 'Account deletion error', error as Error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Cleanup expired guest users
 async function cleanupExpiredGuests() {
   try {
     logger.info('AUTH', 'Cleaning up expired guest users');
     
-    // Find expired guest users
-    const expiredGuests = await db.prepare(`
-      SELECT id FROM users 
-      WHERE is_guest = TRUE AND expires_at < CURRENT_TIMESTAMP
-    `).all() as { id: string }[];
+    // For FileDB, we need to check each user individually since is_guest column may not exist
+    // Get all users and filter for expired guests
+    const allUsers = await db.prepare('SELECT id, email, is_guest, expires_at FROM users').all() as { 
+      id: string; 
+      email: string; 
+      is_guest?: boolean; 
+      expires_at?: string 
+    }[];
+    
+    const expiredGuests = allUsers.filter(user => {
+      // Check if it's a guest user (email starts with guest- or is_guest flag is set)
+      const isGuest = user.is_guest === true || user.email?.startsWith('guest-');
+      // Check if expired (has expires_at and it's in the past)
+      const isExpired = user.expires_at && new Date(user.expires_at) < new Date();
+      return isGuest && isExpired;
+    });
     
     if (expiredGuests.length === 0) {
       logger.trace('AUTH', 'No expired guest users found');
@@ -328,6 +410,7 @@ async function cleanupExpiredGuests() {
     logger.error('AUTH', 'Error cleaning up guest users', error as Error);
   }
 }
+
 
 
 
