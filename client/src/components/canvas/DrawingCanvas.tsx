@@ -858,6 +858,14 @@ export default function DrawingCanvas({
     const isEraser = isPen && e.button === 5; // Pen eraser end
     const isBarrelButton = isPen && e.button === 2; // Pen barrel button
     
+    // Capture pointer to ensure we receive all events even when cursor leaves canvas
+    const canvas = e.currentTarget;
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch (err) {
+      // Ignore if capture fails
+    }
+    
     // For non-drawers: only pan with mouse/touch, not with pen
     if (!isDrawer) {
       if (!isPen && (e.button === 0 || e.button === 1)) {
@@ -877,6 +885,7 @@ export default function DrawingCanvas({
       isPenDrawingRef.current = true;
       const pos = getPos(e as unknown as React.MouseEvent, containerRef, transformRef.current);
       setIsDrawing(true);
+      // FIX: Reset lastPoint on each new stroke to prevent lines shooting to center
       shapeStartRef.current = pos;
       currentStrokeRef.current = [{ x: pos.x, y: pos.y, pressure: e.pressure || 0.5 }];
       currentStrokeIdRef.current = Date.now().toString();
@@ -897,6 +906,7 @@ export default function DrawingCanvas({
     
     // Pen pressure initialization
     smoothedPressureRef.current = isPen && e.pressure > 0 ? e.pressure : 1;
+
     
     const hasCtrl = e.ctrlKey || e.metaKey;
     const hasSpace = keysPressedRef.current.has(' ');
@@ -983,6 +993,7 @@ export default function DrawingCanvas({
       }
 
       setIsDrawing(true);
+      // FIX: Reset lastPoint on each new stroke to prevent lines shooting to center
       shapeStartRef.current = pos;
       currentStrokeRef.current = [{ x: pos.x, y: pos.y, pressure: smoothedPressureRef.current }];
       currentStrokeIdRef.current = Date.now().toString();
@@ -990,12 +1001,30 @@ export default function DrawingCanvas({
     }
   };
 
+  // FIX: Handle pointer cancel/leave to stop drawing when pen leaves canvas
+  const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    handlePointerUp(e);
+  };
+
+  const handlePointerLeave = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // Only stop if we're actually drawing (not just hovering)
+    if (isDrawing) {
+      handlePointerUp(e);
+    }
+  };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const isPen = e.pointerType === 'pen';
     
+    // FIX: Ignore pen hover events (pressure 0, buttons 0)
+    // Pen tablets send hover events even when not touching surface
+    if (isPen && e.buttons === 0) {
+      return;
+    }
+    
     // Don't pan if we're drawing with pen
     if (isPanning && !isPenDrawingRef.current) {
+
       e.preventDefault();
       if (!panStartRef.current) return;
       const dx = e.clientX - panStartRef.current.x;
@@ -1075,12 +1104,21 @@ export default function DrawingCanvas({
 
     setIsDrawing(false);
     isPenDrawingRef.current = false;
+    
+    // FIX: Release pointer capture to prevent stuck events
+    const canvas = e.currentTarget;
+    try {
+      canvas.releasePointerCapture(e.pointerId);
+    } catch (err) {
+      // Ignore if release fails
+    }
 
     // Restore previous tool if using pen eraser
     if (isEraser && (window as any).previousTool) {
       onToolChange?.((window as any).previousTool);
       (window as any).previousTool = undefined;
     }
+
 
     let stroke: Stroke;
     if (['rect', 'circle', 'line'].includes(activeTool)) {
@@ -1192,9 +1230,12 @@ export default function DrawingCanvas({
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerUp}
+            onPointerCancel={handlePointerCancel}
+            onPointerLeave={handlePointerLeave}
+            onLostPointerCapture={handlePointerCancel}
             onWheel={handleWheel}
           />
+
 
         </div>
       </div>

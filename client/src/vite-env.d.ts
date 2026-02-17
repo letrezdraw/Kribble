@@ -1,13 +1,13 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  // API URL for backend requests
-  // Empty string = same-origin (works when Express serves the client)
+  // API Configuration
   readonly VITE_API_URL: string
-  
-  // Socket.io server URL
-  // Empty string = same-origin (works when Express serves the client)
   readonly VITE_SOCKET_URL: string
+  
+  // Feature Flags
+  readonly VITE_DEBUG: string
+  readonly VITE_MOCK_API: string
 }
 
 interface ImportMeta {
