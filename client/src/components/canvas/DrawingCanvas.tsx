@@ -107,6 +107,8 @@ export default function DrawingCanvas({
   const keysPressedRef = useRef<Set<string>>(new Set());
   const lastSyncTimeRef = useRef<number>(0);
   const syncedPointCountRef = useRef<number>(0);
+  const isPenDrawingRef = useRef<boolean>(false);
+
 
   // Initialize canvases
   useEffect(() => {
@@ -852,8 +854,13 @@ export default function DrawingCanvas({
 
   // Pointer handlers
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const isPen = e.pointerType === 'pen';
+    const isEraser = isPen && e.button === 5; // Pen eraser end
+    const isBarrelButton = isPen && e.button === 2; // Pen barrel button
+    
+    // For non-drawers: only pan with mouse/touch, not with pen
     if (!isDrawer) {
-      if (e.button === 0 || e.button === 1) {
+      if (!isPen && (e.button === 0 || e.button === 1)) {
         e.preventDefault();
         setIsPanning(true);
         panStartRef.current = { x: e.clientX, y: e.clientY };
@@ -861,7 +868,24 @@ export default function DrawingCanvas({
       return;
     }
 
-    if (e.button === 2) {
+    // Pen eraser end - switch to eraser tool temporarily
+    if (isEraser) {
+      e.preventDefault();
+      // Store current tool to restore later
+      (window as any).previousTool = activeTool;
+      onToolChange?.('eraser');
+      isPenDrawingRef.current = true;
+      const pos = getPos(e as unknown as React.MouseEvent, containerRef, transformRef.current);
+      setIsDrawing(true);
+      shapeStartRef.current = pos;
+      currentStrokeRef.current = [{ x: pos.x, y: pos.y, pressure: e.pressure || 0.5 }];
+      currentStrokeIdRef.current = Date.now().toString();
+      syncedPointCountRef.current = 0;
+      return;
+    }
+
+    // Right click or pen barrel button - context menu
+    if (e.button === 2 || isBarrelButton) {
       e.preventDefault();
       setContextMenu({ isOpen: true, x: e.clientX, y: e.clientY });
       return;
@@ -871,12 +895,13 @@ export default function DrawingCanvas({
       setContextMenu({ ...contextMenu, isOpen: false });
     }
     
-    const isPen = e.pointerType === 'pen';
+    // Pen pressure initialization
     smoothedPressureRef.current = isPen && e.pressure > 0 ? e.pressure : 1;
     
     const hasCtrl = e.ctrlKey || e.metaKey;
     const hasSpace = keysPressedRef.current.has(' ');
 
+    // Zoom gesture (Ctrl+Space+click)
     if (hasCtrl && hasSpace && e.button === 0) {
       e.preventDefault();
       setIsZooming(true);
@@ -884,48 +909,93 @@ export default function DrawingCanvas({
       return;
     }
 
-    if (e.button === 1 || (e.button === 0 && hasSpace)) {
+    // Pan with middle mouse or Space+click (but NOT with pen)
+    if (!isPen && (e.button === 1 || (e.button === 0 && hasSpace))) {
       e.preventDefault();
       setIsPanning(true);
       panStartRef.current = { x: e.clientX, y: e.clientY };
       return;
     }
 
-    e.preventDefault();
-    const pos = getPos(e as unknown as React.MouseEvent, containerRef, transformRef.current);
+    // Pen with button 0 (tip) - start drawing
+    if (isPen && e.button === 0) {
+      e.preventDefault();
+      isPenDrawingRef.current = true;
+      const pos = getPos(e as unknown as React.MouseEvent, containerRef, transformRef.current);
 
-    if (activeTool === 'text') {
-      setTextInput({ visible: true, x: pos.x, y: pos.y, value: '' });
+      if (activeTool === 'text') {
+        setTextInput({ visible: true, x: pos.x, y: pos.y, value: '' });
+        return;
+      }
+
+      if (activeTool === 'fill') {
+        const canvasState = staticCtxRef.current!.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE).data;
+        floodFill(staticCtxRef.current!, pos.x, pos.y, brushColor, brushOpacity);
+        const stroke: Stroke = {
+          id: Date.now().toString(),
+          tool: 'fill',
+          points: [{ x: pos.x, y: pos.y, pressure: 1 }],
+          color: brushColor,
+          size: brushSize,
+          opacity: brushOpacity,
+          canvasState: new Uint8ClampedArray(canvasState),
+        };
+        canvasStateRef.current.strokes.push(stroke);
+        canvasStateRef.current.redoStack = [];
+        socket?.emit('draw:stroke', { stroke });
+        return;
+      }
+
+      setIsDrawing(true);
+      shapeStartRef.current = pos;
+      currentStrokeRef.current = [{ x: pos.x, y: pos.y, pressure: smoothedPressureRef.current }];
+      currentStrokeIdRef.current = Date.now().toString();
+      syncedPointCountRef.current = 0;
       return;
     }
 
-    if (activeTool === 'fill') {
-      const canvasState = staticCtxRef.current!.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE).data;
-      floodFill(staticCtxRef.current!, pos.x, pos.y, brushColor, brushOpacity);
-      const stroke: Stroke = {
-        id: Date.now().toString(),
-        tool: 'fill',
-        points: [{ x: pos.x, y: pos.y, pressure: 1 }],
-        color: brushColor,
-        size: brushSize,
-        opacity: brushOpacity,
-        canvasState: new Uint8ClampedArray(canvasState),
-      };
-      canvasStateRef.current.strokes.push(stroke);
-      canvasStateRef.current.redoStack = [];
-      socket?.emit('draw:stroke', { stroke });
-      return;
-    }
+    // Mouse drawing
+    if (!isPen) {
+      e.preventDefault();
+      const pos = getPos(e as unknown as React.MouseEvent, containerRef, transformRef.current);
 
-    setIsDrawing(true);
-    shapeStartRef.current = pos;
-    currentStrokeRef.current = [{ x: pos.x, y: pos.y, pressure: smoothedPressureRef.current }];
-    currentStrokeIdRef.current = Date.now().toString();
-    syncedPointCountRef.current = 0;
+      if (activeTool === 'text') {
+        setTextInput({ visible: true, x: pos.x, y: pos.y, value: '' });
+        return;
+      }
+
+      if (activeTool === 'fill') {
+        const canvasState = staticCtxRef.current!.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE).data;
+        floodFill(staticCtxRef.current!, pos.x, pos.y, brushColor, brushOpacity);
+        const stroke: Stroke = {
+          id: Date.now().toString(),
+          tool: 'fill',
+          points: [{ x: pos.x, y: pos.y, pressure: 1 }],
+          color: brushColor,
+          size: brushSize,
+          opacity: brushOpacity,
+          canvasState: new Uint8ClampedArray(canvasState),
+        };
+        canvasStateRef.current.strokes.push(stroke);
+        canvasStateRef.current.redoStack = [];
+        socket?.emit('draw:stroke', { stroke });
+        return;
+      }
+
+      setIsDrawing(true);
+      shapeStartRef.current = pos;
+      currentStrokeRef.current = [{ x: pos.x, y: pos.y, pressure: smoothedPressureRef.current }];
+      currentStrokeIdRef.current = Date.now().toString();
+      syncedPointCountRef.current = 0;
+    }
   };
 
+
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (isPanning) {
+    const isPen = e.pointerType === 'pen';
+    
+    // Don't pan if we're drawing with pen
+    if (isPanning && !isPenDrawingRef.current) {
       e.preventDefault();
       if (!panStartRef.current) return;
       const dx = e.clientX - panStartRef.current.x;
@@ -954,7 +1024,6 @@ export default function DrawingCanvas({
     e.preventDefault();
 
     const pos = getPosFromEvent(e.nativeEvent, containerRef, transformRef.current);
-    const isPen = e.pointerType === 'pen';
     let rawPressure = isPen ? (e.pressure > 0 ? e.pressure : 0.5) : 1;
     
     const prevSmoothed = smoothedPressureRef.current;
@@ -985,7 +1054,11 @@ export default function DrawingCanvas({
     }
   };
 
+
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const isPen = e.pointerType === 'pen';
+    const isEraser = isPen && e.button === 5;
+    
     if (isPanning) {
       setIsPanning(false);
       panStartRef.current = null;
@@ -1001,6 +1074,13 @@ export default function DrawingCanvas({
     if (!isDrawing || !staticCtxRef.current || !liveCtxRef.current || !socket) return;
 
     setIsDrawing(false);
+    isPenDrawingRef.current = false;
+
+    // Restore previous tool if using pen eraser
+    if (isEraser && (window as any).previousTool) {
+      onToolChange?.((window as any).previousTool);
+      (window as any).previousTool = undefined;
+    }
 
     let stroke: Stroke;
     if (['rect', 'circle', 'line'].includes(activeTool)) {
@@ -1038,6 +1118,7 @@ export default function DrawingCanvas({
     shapeStartRef.current = null;
     smoothedPressureRef.current = 1;
   };
+
 
   const handleWheel = (e: React.WheelEvent) => {
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
