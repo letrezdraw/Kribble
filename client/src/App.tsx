@@ -8,6 +8,9 @@ import Profile from './pages/Profile';
 import Settings from './pages/Settings';
 import { LandingMobile, LoginMobile, LobbyMobile, GameRoomMobile, ProfileMobile, SettingsMobile } from './pages/mobile';
 import VersionDisplay from './components/VersionDisplay';
+import ErrorBoundary from './components/ErrorBoundary';
+import './components/ErrorBoundary.css';
+
 
 
 
@@ -26,7 +29,7 @@ function App() {
 
 
   return (
-    <>
+    <ErrorBoundary>
       <Routes>
         <Route path="/" element={user ? <Navigate to="/lobby" /> : (isMobile ? <LandingMobile /> : <Landing />)} />
         <Route path="/login" element={user ? <Navigate to="/lobby" /> : (isMobile ? <LoginMobile /> : <Login />)} />
@@ -37,8 +40,9 @@ function App() {
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
       <VersionDisplay />
-    </>
+    </ErrorBoundary>
   );
+
 
 }
 

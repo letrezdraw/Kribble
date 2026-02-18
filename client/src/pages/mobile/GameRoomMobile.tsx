@@ -147,7 +147,7 @@ export default function GameRoomMobile() {
     const trimmedGuess = guess.trim();
     if (isDrawer) {
       socket?.emit('chat:message', { message: trimmedGuess });
-    } else if (gameState.phase === 'drawing') {
+    } else if (room?.phase === 'drawing') {
       submitGuess(trimmedGuess);
     } else {
       socket?.emit('chat:message', { message: trimmedGuess });
@@ -162,7 +162,7 @@ export default function GameRoomMobile() {
   const getWordDisplay = () => gameState.currentWord ? gameState.wordHints.join(' ') : '???';
 
   const sortedPlayers = [...(room?.players || [])].sort((a: Player, b: Player) => b.score - a.score);
-  const isSoloMode = gameState.phase === 'freeDraw' || room?.settings?.gameMode === 'solo' || (room?.players?.length === 1 && room?.maxPlayers === 1);
+  const isSoloMode = room?.settings?.gameMode === 'solo' || (room?.players?.length === 1 && room?.maxPlayers === 1);
 
   const toggleFullscreen = () => {
     const newFullscreen = !isFullscreen;
@@ -181,8 +181,9 @@ export default function GameRoomMobile() {
     }
   }, []);
 
-  // If in lobby, show full lobby screen
-  if (gameState.phase === 'lobby') {
+  // If in waiting phase, show full lobby screen
+  if (room?.phase === 'waiting') {
+
     return (
       <div className="game-room-mobile lobby-screen">
         <header className="lobby-header">
@@ -208,8 +209,9 @@ export default function GameRoomMobile() {
             <div className="lobby-players">
               <h3>Players in room</h3>
               <div className="players-avatars">
-                {room?.players?.map((player) => (
-                  <div key={player.id} className="player-avatar-item" title={player.username}>
+              {room?.players?.map((player) => (
+                <div key={player.userId} className="player-avatar-item" title={player.username}>
+
                     <span className="avatar-emoji">{player.avatarId}</span>
                     {player.isHost && <span className="host-badge">👑</span>}
                     <span className="player-name-tag">{player.username}</span>
@@ -405,16 +407,15 @@ export default function GameRoomMobile() {
           <div className="header-center">
             <h1 className="room-title">{room?.name || 'Game'}</h1>
             <div className="game-badges">
-              {gameState.phase === 'freeDraw' ? (
-                <span className="badge free-draw">Free Draw</span>
-              ) : !isSoloMode ? (
+            {room?.phase === 'drawing' && gameState.roundNumber > 0 ? (
                 <>
-                  <span className="badge round">Round {gameState.currentRound}/{gameState.totalRounds}</span>
-                  <span className={`badge timer ${gameState.timeRemaining <= 10 ? 'urgent' : ''}`}>
+                  <span className="badge round">Round {gameState.roundNumber}/{gameState.totalRounds}</span>
+                  <span className={`badge timer ${gameState.turnTimer <= 10 ? 'urgent' : ''}`}>
                     <Clock size={10} />
-                    {gameState.timeRemaining}s
+                    {gameState.turnTimer}s
                   </span>
                 </>
+
               ) : null}
             </div>
           </div>
@@ -427,7 +428,8 @@ export default function GameRoomMobile() {
         </div>
 
         {/* Drawer Indicator */}
-        {gameState.phase === 'drawing' && (
+        {room?.phase === 'drawing' && (
+
           <div className="drawer-indicator">
             <Pencil size={14} />
             <span>
@@ -437,7 +439,8 @@ export default function GameRoomMobile() {
         )}
 
         {/* Word Bar */}
-        {gameState.phase === 'drawing' && (
+        {room?.phase === 'drawing' && (
+
           <div className="word-bar">
             {isDrawer ? (
               <span className="word-text">Draw: <strong>{gameState.currentWord}</strong></span>
@@ -447,13 +450,13 @@ export default function GameRoomMobile() {
           </div>
         )}
 
-        {gameState.phase === 'selection' && isDrawer && (
+        {room?.phase === 'wordSelection' && isDrawer && (
           <div className="word-bar selection">
             <span>Choose a word to draw...</span>
           </div>
         )}
 
-        {gameState.phase === 'selection' && !isDrawer && (
+        {room?.phase === 'wordSelection' && !isDrawer && (
           <div className="word-bar selection">
             <span>Waiting for {room?.players?.find(p => p.isDrawer)?.username || 'drawer'} to choose...</span>
           </div>
@@ -464,8 +467,9 @@ export default function GameRoomMobile() {
       <main className="canvas-container-mobile">
         <div className="canvas-wrapper-mobile">
           <DrawingCanvas
-            isDrawer={isDrawer || gameState.phase === 'freeDraw'}
+            isDrawer={isDrawer}
             brushColor={brushColor}
+
             brushSize={brushSize}
             brushOpacity={brushOpacity / 100}
             activeTool={activeTool}
@@ -482,9 +486,11 @@ export default function GameRoomMobile() {
           {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
         </button>
 
-        {/* Drawing Toolbar */}
-        {(isDrawer || gameState.phase === 'freeDraw') && showToolbar && (
+        {/* Drawing Toolbar - Only show for drawer */}
+        {isDrawer && showToolbar && (
+
           <div className="floating-toolbar">
+
             <div className="toolbar-section tools">
 
 
@@ -534,11 +540,13 @@ export default function GameRoomMobile() {
           </div>
         )}
 
-        {(isDrawer || gameState.phase === 'freeDraw') && !showToolbar && (
+        {isDrawer && !showToolbar && (
+
           <button className="toolbar-show-btn" onClick={() => setShowToolbar(true)}>
             <Palette size={20} />
           </button>
         )}
+
 
         {/* Fixed Chat Panel - Bottom 30% (Permanent, no toggle) */}
         <div className="fixed-chat-panel">
@@ -576,7 +584,7 @@ export default function GameRoomMobile() {
 
 
         {/* Overlays */}
-        {gameState.phase === 'selection' && isDrawer && (
+        {room?.phase === 'wordSelection' && isDrawer && (
           <div className="overlay-panel word-select">
             <h3>Choose a word</h3>
             <div className="word-grid">
@@ -584,31 +592,34 @@ export default function GameRoomMobile() {
                 <button key={i} className="word-btn" onClick={() => selectWord(word)}>{word}</button>
               ))}
             </div>
-            <div className="timer-text">{gameState.selectionTimeRemaining}s</div>
+            <div className="timer-text">{gameState.wordSelectionTimer}s</div>
           </div>
         )}
 
-        {gameState.phase === 'selection' && !isDrawer && (
+        {room?.phase === 'wordSelection' && !isDrawer && (
+
           <div className="overlay-panel waiting">
             <div className="spinner" />
             <p>Waiting for drawer to choose...</p>
           </div>
         )}
 
-        {gameState.phase === 'roundEnd' && (
+        {room?.phase === 'roundEnd' && (
+
           <div className="overlay-panel round-end">
             <h3>Round Complete!</h3>
             <p className="word-reveal">The word was: <strong>{gameState.currentWord}</strong></p>
           </div>
         )}
 
-        {gameState.phase === 'gameEnd' && rankings && (
+        {room?.phase === 'gameEnd' && rankings && (
           <div className="overlay-panel game-end">
             <Crown size={40} className="winner-icon" />
             <h2>Game Over!</h2>
             <div className="podium">
               {rankings.slice(0, 3).map((player: any, index: number) => (
-                <div key={player.playerId} className={`podium-item rank-${index + 1}`}>
+                <div key={player.userId} className={`podium-item rank-${index + 1}`}>
+
                   <span className="medal">{index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉'}</span>
                   <span className="name">{player.username}</span>
                   <span className="score">{player.score}</span>
@@ -633,7 +644,8 @@ export default function GameRoomMobile() {
             </div>
             <div className="sheet-content players-content">
               {sortedPlayers.map((player, index) => (
-                <div key={player.id} className={`player-row ${player.isDrawer ? 'drawer' : ''}`}>
+                <div key={player.userId} className={`player-row ${player.isDrawer ? 'drawer' : ''}`}>
+
                   <div className="rank">#{index + 1}</div>
                   <div className="avatar">{player.avatarId}</div>
                   <div className="info">

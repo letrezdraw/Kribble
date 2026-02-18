@@ -1,8 +1,31 @@
 @import './design-system.css';
 
 /* ============================================
+   CSS VARIABLES FOR THEMING
+   ============================================ */
+
+:root {
+  /* Default theme (Midnight) - will be overridden by ThemeProvider */
+  --bg-primary: #0f0f1a;
+  --bg-secondary: #1a1a2e;
+  --bg-tertiary: #16213e;
+  --accent-primary: #8b5cf6;
+  --accent-secondary: #06b6d4;
+  --accent-tertiary: #ec4899;
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255,255,255,0.7);
+  --text-muted: rgba(255,255,255,0.5);
+  --glass-bg: rgba(255, 255, 255, 0.03);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --success: #10b981;
+  --warning: #f59e0b;
+  --error: #ef4444;
+}
+
+/* ============================================
    GLOBAL STYLES & COMPONENT BASELINES
    ============================================ */
+
 
 /* Button Base Styles */
 .btn {

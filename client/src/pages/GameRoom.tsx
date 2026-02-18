@@ -17,7 +17,7 @@ import './GameRoom.css';
 
 interface ChatMessage {
   id: string;
-  playerId: string;
+  userId: string;
   username: string;
   message: string;
   isCorrect?: boolean;
@@ -46,7 +46,6 @@ export default function GameRoom() {
   const { user } = useAuth();
   const { socket } = useSocket();
   const { room, gameState, isDrawer, isHost, leaveRoom, submitGuess, startGame, rankings, playAgain, selectWord, joinRoom, requestHint } = useGame();
-
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [guess, setGuess] = useState('');
@@ -82,9 +81,7 @@ export default function GameRoom() {
     }
   }, [roomId, room, joinRoom, location.state]);
 
-
   // Sync room settings to local state - only for non-hosts to receive updates
-  // Hosts manage their own local state until they apply
   useEffect(() => {
     if (room && !isHost) {
       setGameSettings(prev => ({
@@ -100,8 +97,7 @@ export default function GameRoom() {
     }
   }, [room, isHost]);
 
-
-  // FIX: Update settings function with proper room ID from room object
+  // Update settings function with proper room ID from room object
   const updateSettings = useCallback(() => {
     if (!isHost || !socket || !room?.id) {
       return;
@@ -121,8 +117,6 @@ export default function GameRoom() {
     });
   }, [isHost, socket, room, gameSettings]);
 
-
-
   const handleClearCanvas = useCallback(() => {
     (window as any).canvasControls?.clear();
   }, []);
@@ -141,7 +135,7 @@ export default function GameRoom() {
 
     const handleChatMessage = (data: ChatMessage & { _local?: boolean }) => {
       if (data._local) return;
-      const messageId = data.id || generateMessageId();
+      const messageId = (data as any).id || generateMessageId();
       if (processedMessageIds.current.has(messageId)) return;
       processedMessageIds.current.add(messageId);
       
@@ -152,30 +146,15 @@ export default function GameRoom() {
       }]);
     };
 
-    const handleGuessCorrect = (data: { playerId: string; username: string; word: string; points?: number }) => {
-      // Prevent duplicate messages - check if we already have a similar message recently
-      const recentMessage = Array.from(processedMessageIds.current).find(id => {
-        const msg = messages.find(m => m.id === id);
-        return msg && msg.message.includes(`${data.username} guessed the word`);
-      });
-      
-      if (recentMessage) {
-        return;
-      }
-
-      
+    const handlePlayerGuessed = (data: { userId: string; username: string; points: number }) => {
       const messageId = generateMessageId();
       processedMessageIds.current.add(messageId);
       
-      // If points is 0, this is the immediate notification - don't show points yet
-      // Points will be shown at round end
-      const messageText = data.points && data.points > 0 
-        ? `${data.username} guessed the word! (+${data.points} pts)`
-        : `${data.username} guessed the word!`;
+      const messageText = `${data.username} guessed the word! (+${data.points} pts)`;
       
       setMessages(prev => [...prev, {
         id: messageId,
-        playerId: 'system',
+        userId: 'system',
         username: 'System',
         message: messageText,
         isCorrect: true,
@@ -183,14 +162,12 @@ export default function GameRoom() {
       }]);
     };
 
-
-
     socket.on('chat:message', handleChatMessage);
-    socket.on('game:guess-correct', handleGuessCorrect);
+    socket.on('game:player-guessed', handlePlayerGuessed);
 
     return () => {
       socket.off('chat:message', handleChatMessage);
-      socket.off('game:guess-correct', handleGuessCorrect);
+      socket.off('game:player-guessed', handlePlayerGuessed);
       listenersSetup.current = false;
     };
   }, [socket]);
@@ -217,12 +194,7 @@ export default function GameRoom() {
 
   const sortedPlayers = [...(room?.players || [])].sort((a: Player, b: Player) => b.score - a.score);
 
-  // Check if solo/free draw mode (server switches to freeDraw when solo player starts)
-  const isSoloMode = gameState.phase === 'freeDraw' || room?.settings?.gameMode === 'solo' || (room?.players?.length === 1 && room?.maxPlayers === 1);
-
   return (
-
-
     <div className="game-room-desktop">
       {/* Header */}
       <header className="game-header-desktop">
@@ -240,27 +212,18 @@ export default function GameRoom() {
         </div>
 
         <div className="header-center">
-          {gameState.phase !== 'lobby' && gameState.phase !== 'freeDraw' && !isSoloMode && (
+          {room?.phase !== 'waiting' && room?.phase !== 'gameEnd' && (
             <div className="game-status">
               <div className="round-badge">
-                Round {gameState.currentRound} / {gameState.totalRounds}
+                Round {gameState.roundNumber} / {gameState.totalRounds}
               </div>
-              <div className={`timer-badge ${gameState.timeRemaining <= 10 ? 'urgent' : ''}`}>
+              <div className={`timer-badge ${gameState.turnTimer <= 10 ? 'urgent' : ''}`}>
                 <Clock size={16} />
-                <span>{gameState.timeRemaining}s</span>
-              </div>
-            </div>
-          )}
-          {gameState.phase === 'freeDraw' && (
-            <div className="game-status">
-              <div className="free-draw-badge">
-                <Sparkles size={16} />
-                Free Draw Mode
+                <span>{gameState.turnTimer}s</span>
               </div>
             </div>
           )}
         </div>
-
 
 
         <div className="header-right">
@@ -287,10 +250,9 @@ export default function GameRoom() {
           <div className="players-list">
             {sortedPlayers.map((player: Player, index: number) => (
               <div 
-                key={player.id} 
-                className={`player-card ${player.id === room?.players.find((p: Player) => p.isDrawer)?.id ? 'drawer' : ''} ${player.isHost ? 'host' : 'player'}`}
+                key={player.userId} 
+                className={`player-card ${player.isDrawer ? 'drawer' : ''} ${player.isHost ? 'host' : ''} ${!player.connected ? 'offline' : ''}`}
               >
-
                 <div className="player-rank">#{index + 1}</div>
                 <div className="player-avatar">{player.avatarId}</div>
                 <div className="player-info">
@@ -298,6 +260,7 @@ export default function GameRoom() {
                     {player.username}
                     {player.isHost && <Crown size={12} className="host-icon" />}
                     {player.isDrawer && <Pencil size={12} className="drawer-icon" />}
+                    {!player.connected && <span className="offline-badge">(Offline)</span>}
                   </div>
                   <div className="player-score">{player.score} pts</div>
                 </div>
@@ -305,7 +268,7 @@ export default function GameRoom() {
             ))}
           </div>
 
-          {gameState.phase === 'lobby' && isHost && (
+          {room?.phase === 'waiting' && isHost && (
             <div className="lobby-actions">
               <Button variant="primary" fullWidth onClick={startGame}>
                 <Sparkles size={16} />
@@ -313,12 +276,13 @@ export default function GameRoom() {
               </Button>
             </div>
           )}
+
         </aside>
 
         {/* Center - Canvas Area */}
         <main className="canvas-area">
           {/* Word Display */}
-          {gameState.phase === 'drawing' && (
+          {room?.phase === 'drawing' && (
             <div className="word-display-bar">
               {isDrawer ? (
                 <div className="word-revealed">
@@ -338,12 +302,23 @@ export default function GameRoom() {
                 <Sparkles size={14} />
                 {gameState.hintsRemaining} hints remaining
               </div>
-
-
+              <button 
+                className="leave-room-btn-bar"
+                onClick={() => {
+                  leaveRoom();
+                  navigate('/lobby');
+                }}
+                title="Leave Room"
+              >
+                <LogOut size={16} />
+                Leave
+              </button>
             </div>
           )}
 
-          {gameState.phase === 'selection' && isDrawer && (
+
+          {room?.phase === 'wordSelection' && isDrawer && (
+
             <div className="word-selection-panel">
               <h3>Choose a word to draw:</h3>
               <div className="word-options">
@@ -358,25 +333,26 @@ export default function GameRoom() {
                 ))}
               </div>
               <div className="selection-timer">
-                Choosing in {gameState.selectionTimeRemaining}s...
+                Choosing in {gameState.wordSelectionTimer}s...
               </div>
             </div>
           )}
 
-          {gameState.phase === 'selection' && !isDrawer && (
+          {room?.phase === 'wordSelection' && !isDrawer && (
             <div className="waiting-panel">
               <div className="spinner"></div>
               <p>Waiting for drawer to choose a word...</p>
             </div>
           )}
 
-          {gameState.phase === 'roundEnd' && (
+          {room?.phase === 'roundEnd' && (
+
             <div className="round-end-panel">
               <h3>Round Complete!</h3>
               <p className="word-reveal">The word was: <strong>{gameState.currentWord}</strong></p>
               <div className="round-scores">
                 {sortedPlayers.slice(0, 3).map((player: Player, i: number) => (
-                  <div key={player.id} className="round-score-item">
+                  <div key={player.userId} className="round-score-item">
                     <span className="medal">
                       {i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}
                     </span>
@@ -388,14 +364,15 @@ export default function GameRoom() {
             </div>
           )}
 
-          {gameState.phase === 'gameEnd' && rankings && (
+          {room?.phase === 'gameEnd' && rankings && (
+
             <div className="game-end-panel">
               <Trophy size={48} className="trophy-icon" />
               <h2>Game Over!</h2>
               <div className="final-standings">
                 {rankings.map((player: any, index: number) => (
                   <div 
-                    key={player.playerId}
+                    key={player.userId}
                     className={`final-player ${index === 0 ? 'winner' : ''}`}
                   >
                     <span className="final-rank">
@@ -418,7 +395,8 @@ export default function GameRoom() {
           )}
 
           {/* Lobby Waiting Overlay with Settings beside */}
-          {gameState.phase === 'lobby' && (
+          {room?.phase === 'waiting' && (
+
             <div className="lobby-waiting-overlay">
               <div className="waiting-animation">
                 <div className="waiting-left">
@@ -441,13 +419,13 @@ export default function GameRoom() {
                 <div className="waiting-right">
                   <div className="room-code-display">
                     <span className="code-label">Room Code:</span>
-                    <span className="code-value">{roomId?.split('-')[1]?.toUpperCase() || roomId}</span>
+                    <span className="code-value">{roomId?.toUpperCase()}</span>
                   </div>
                   <div className="waiting-players-list">
                     <h4>Players in room ({room?.players?.length || 0}/{room?.maxPlayers || 8}):</h4>
                     <div className="waiting-avatars">
                       {room?.players?.map((player) => (
-                        <div key={player.id} className="waiting-avatar" title={player.username}>
+                        <div key={player.userId} className="waiting-avatar" title={player.username}>
                           {player.avatarId}
                           {player.isHost && <span className="host-crown">👑</span>}
                         </div>
@@ -572,13 +550,13 @@ export default function GameRoom() {
                     )}
                   </div>
                 )}
-
               </div>
             </div>
           )}
 
           {/* Drawer Indicator - Shows current drawer in multiplayer */}
-          {gameState.phase === 'drawing' && !isSoloMode && (
+          {room?.phase === 'drawing' && (
+
             <div className="drawer-indicator">
               <Pencil size={16} />
               <span className="drawer-label">
@@ -590,7 +568,7 @@ export default function GameRoom() {
           {/* Canvas */}
           <div className="canvas-wrapper">
             <DrawingCanvas
-              isDrawer={isDrawer || gameState.phase === 'freeDraw'}
+              isDrawer={isDrawer}
               brushColor={brushColor}
               brushSize={brushSize}
               brushOpacity={1}
@@ -602,10 +580,8 @@ export default function GameRoom() {
             />
           </div>
 
-
-
           {/* Drawing Tools - Only for drawer */}
-          {(isDrawer || gameState.phase === 'freeDraw') && (
+          {isDrawer && (
             <div className="drawing-toolbar">
               <div className="tool-group">
                 <button 
@@ -747,7 +723,7 @@ export default function GameRoom() {
               messages.map((msg: ChatMessage, index: number) => (
                 <div 
                   key={`${msg.id}-${index}`}
-                  className={`chat-message ${msg.isCorrect ? 'correct-guess' : ''} ${msg.playerId === 'system' ? 'system' : ''}`}
+                  className={`chat-message ${msg.isCorrect ? 'correct-guess' : ''} ${msg.userId === 'system' ? 'system' : ''}`}
                 >
                   <span className="message-sender">{msg.username}:</span>
                   <span className="message-text">{msg.message}</span>

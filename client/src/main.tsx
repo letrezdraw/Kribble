@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { SocketProvider } from './contexts/SocketContext';
 import { GameProvider } from './contexts/GameContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import './styles/design-system.css';
 import './styles/global.css';
 import './styles/mobile.css';
@@ -15,12 +16,6 @@ const loadSettings = () => {
     const saved = localStorage.getItem('kribble_settings');
     if (saved) {
       const settings = JSON.parse(saved);
-      
-      // Apply theme
-      document.documentElement.setAttribute('data-theme', settings.theme || 'dark');
-      if (settings.theme === 'light') {
-        document.body.style.background = 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)';
-      }
       
       // Set global flags
       window.__SOUND_ENABLED__ = settings.sound !== false;
@@ -38,16 +33,17 @@ const loadSettings = () => {
 loadSettings();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-
   <React.StrictMode>
     <BrowserRouter>
-      <AuthProvider>
-        <SocketProvider>
-          <GameProvider>
-            <App />
-          </GameProvider>
-        </SocketProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <SocketProvider>
+            <GameProvider>
+              <App />
+            </GameProvider>
+          </SocketProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </BrowserRouter>
   </React.StrictMode>
 );

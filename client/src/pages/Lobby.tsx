@@ -3,34 +3,70 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Search, Plus, Users, Lock, Globe, Play, LogOut, 
-  Zap, Trophy, Target, Gamepad2, Crown, Settings
+  Zap, Trophy, Target, Gamepad2, Sparkles
 } from 'lucide-react';
-
 
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
+import { useTheme } from '../contexts/ThemeContext';
 import Button from '../components/Button';
 import CreateRoomModal from '../components/CreateRoomModal';
 import { getRankByLevel } from '../utils/ranks';
 import type { LeaderboardEntry } from '../types';
 import api from '../services/api';
 
-
 import './Lobby.css';
 
 interface Room {
   id: string;
   name: string;
-  players: number;
+  hostName?: string;
+  playerCount: number;
   maxPlayers: number;
   isPrivate: boolean;
   gameMode: string;
-  isInGame?: boolean;
+  phase: string;
 }
+
+// Particle background component
+const ParticleBackground = () => {
+  return (
+    <div className="particle-background">
+      {[...Array(20)].map((_, i) => (
+        <motion.div
+          key={i}
+          className="particle"
+          initial={{ 
+            x: Math.random() * 100 + '%', 
+            y: Math.random() * 100 + '%',
+            scale: 0 
+          }}
+          animate={{ 
+            y: [null, '-100%'],
+            scale: [0, 1, 0],
+            opacity: [0, 0.5, 0]
+          }}
+          transition={{ 
+            duration: 10 + Math.random() * 10,
+            repeat: Infinity,
+            delay: Math.random() * 5
+          }}
+          style={{
+            left: `${Math.random() * 100}%`,
+            top: '100%',
+            width: `${4 + Math.random() * 8}px`,
+            height: `${4 + Math.random() * 8}px`,
+          }}
+        />
+      ))}
+    </div>
+  );
+};
 
 export default function Lobby() {
   const { user, logout } = useAuth();
   const { socket } = useSocket();
+  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -48,13 +84,37 @@ export default function Lobby() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
 
+  // Fetch rooms via socket
   useEffect(() => {
-    fetchRooms();
+    if (!socket) return;
+
+    socket.emit('lobby:get-rooms');
+
+    socket.on('lobby:rooms', (data: { rooms: Room[] }) => {
+      setRooms(data.rooms || []);
+      setLoading(false);
+    });
+
+    socket.on('lobby:rooms-updated', (data: { rooms: Room[] }) => {
+      setRooms(data.rooms || []);
+    });
+
+    const interval = setInterval(() => {
+      socket.emit('lobby:get-rooms');
+    }, 3000);
+
+    return () => {
+      clearInterval(interval);
+      socket.off('lobby:rooms');
+      socket.off('lobby:rooms-updated');
+    };
+  }, [socket]);
+
+  useEffect(() => {
     fetchOnlineCount();
     fetchLeaderboard();
     
     const interval = setInterval(() => {
-      fetchRooms();
       fetchOnlineCount();
     }, 3000);
 
@@ -66,35 +126,18 @@ export default function Lobby() {
       const response = await api.get('/users/online/count');
       setOnlineCount(response.data.count);
     } catch (error) {
-      // Silently handle error - online count is not critical
+      // Silently handle error
     }
   };
-
-
 
   const fetchLeaderboard = async () => {
     try {
       const response = await api.get('/users/leaderboard?limit=5');
       setLeaderboard(response.data.leaderboard);
     } catch (error) {
-      // Silently handle error - leaderboard will retry on next poll
+      // Silently handle error
     }
   };
-
-
-
-  const fetchRooms = async () => {
-    try {
-      const response = await api.get('/rooms');
-      setRooms(response.data.rooms || []);
-    } catch (error) {
-      setRooms([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-
 
   useEffect(() => {
     let filtered = rooms;
@@ -120,7 +163,7 @@ export default function Lobby() {
 
   const handleQuickMatch = () => {
     const availableRoom = rooms.find(r => 
-      !r.isPrivate && r.players < r.maxPlayers && !r.isInGame
+      !r.isPrivate && r.playerCount < r.maxPlayers && r.phase === 'waiting'
     );
     if (availableRoom) {
       navigate(`/room/${availableRoom.id}`);
@@ -140,91 +183,133 @@ export default function Lobby() {
     e.preventDefault();
     if (!roomCodeInput.trim()) return;
     
-    // Convert code to full room ID format
-    const code = roomCodeInput.trim().toLowerCase();
-    const roomId = `room-${code}`;
-    navigate(`/room/${roomId}`, { state: { joinByCode: true } });
+    const code = roomCodeInput.trim().toUpperCase();
+    navigate(`/room/${code}`, { state: { joinByCode: true } });
     setRoomCodeInput('');
   };
 
-
-
   const rank = getRankByLevel(user?.level || 1);
+
+  const getThemeIcon = () => {
+    switch (theme) {
+      case 'ocean': return '🌊';
+      case 'sunset': return '🌅';
+      case 'forest': return '🌲';
+      default: return '🌙';
+    }
+  };
 
   return (
     <div className="lobby">
+      <ParticleBackground />
+      
       {/* Header */}
-      <header className="lobby-header">
+      <header className="lobby-header glass">
         <div className="header-left">
           <Link to="/" className="logo">
-            <span className="logo-icon">🎨</span>
+            <span className="logo-icon">
+              <Sparkles size={28} />
+            </span>
             <span className="logo-text">Kribble</span>
           </Link>
         </div>
         
         <div className="header-right">
-          <div className="online-indicator">
-            <div className="online-dot"></div>
+          {/* Theme Switcher */}
+          <motion.button
+            className="theme-toggle glass"
+            onClick={toggleTheme}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            title={`Theme: ${theme}`}
+          >
+            <span className="theme-icon">{getThemeIcon()}</span>
+          </motion.button>
+
+          <div className="online-indicator glass">
+            <div className="online-dot pulse"></div>
             <span>{onlineCount} online</span>
           </div>
-          <div className="user-profile">
+          
+          <div className="user-profile glass">
             <span className="username">{user?.username || 'Guest'}</span>
-            <div 
+            <motion.div 
               className="user-avatar" 
               style={{ borderColor: rank.color }}
               onClick={() => navigate('/profile')}
+              whileHover={{ scale: 1.1 }}
             >
               {user?.avatarId || '👤'}
-            </div>
+            </motion.div>
           </div>
+          
           <Button variant="ghost" size="sm" onClick={logout}>
             <LogOut size={18} />
           </Button>
         </div>
-
       </header>
 
       {/* Main Layout */}
       <div className="lobby-main">
         {/* Sidebar */}
         <aside className="lobby-sidebar">
-          <div className="sidebar-section">
-            <div className="sidebar-title">Join by Code</div>
+          <motion.div 
+            className="sidebar-section glass"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            <div className="sidebar-title">
+              <Zap size={16} />
+              Join by Code
+            </div>
             <form className="join-code-form" onSubmit={handleJoinByCode}>
-              <div className="join-code-input-wrapper">
+              <div className="join-code-input-wrapper glass">
                 <input
                   type="text"
-                  placeholder="Enter room code..."
+                  placeholder="Enter code..."
                   value={roomCodeInput}
                   onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase())}
                   className="join-code-input"
-                  maxLength={20}
+                  maxLength={6}
                 />
-                <button type="submit" className="join-code-btn">
+                <motion.button 
+                  type="submit" 
+                  className="join-code-btn"
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                >
                   <Play size={16} />
-                </button>
+                </motion.button>
               </div>
             </form>
-          </div>
+          </motion.div>
 
-          <div className="sidebar-section">
-            <div className="sidebar-title">Quick Actions</div>
+          <motion.div 
+            className="sidebar-section glass"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.2 }}
+          >
+            <div className="sidebar-title">
+              <Gamepad2 size={16} />
+              Quick Actions
+            </div>
             <div className="quick-actions">
-
               <motion.button 
-                key="quick-play"
-                className="quick-action-btn primary"
+                className="quick-action-btn primary glass"
                 onClick={handleQuickMatch}
+                whileHover={{ scale: 1.02, y: -2 }}
                 whileTap={{ scale: 0.98 }}
               >
-                <Gamepad2 size={20} />
+                <Zap size={20} />
                 <span>Quick Play</span>
               </motion.button>
               
               <motion.button 
-                key="leaderboard"
-                className="quick-action-btn"
+                className="quick-action-btn glass"
                 onClick={() => setShowLeaderboard(true)}
+                whileHover={{ scale: 1.02, y: -2 }}
                 whileTap={{ scale: 0.98 }}
               >
                 <Trophy size={20} />
@@ -232,38 +317,36 @@ export default function Lobby() {
               </motion.button>
               
               <motion.button 
-                key="profile"
-                className="quick-action-btn"
+                className="quick-action-btn glass"
                 onClick={() => navigate('/profile')}
+                whileHover={{ scale: 1.02, y: -2 }}
                 whileTap={{ scale: 0.98 }}
               >
                 <Target size={20} />
                 <span>My Profile</span>
               </motion.button>
-              
-              <motion.button 
-                key="settings"
-                className="quick-action-btn"
-                onClick={() => navigate('/settings')}
-                whileTap={{ scale: 0.98 }}
-              >
-                <Settings size={20} />
-                <span>Settings</span>
-              </motion.button>
-
             </div>
-          </div>
+          </motion.div>
 
-          <div className="sidebar-section">
-            <div className="sidebar-title">Top Players</div>
+          <motion.div 
+            className="sidebar-section glass"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.3 }}
+          >
+            <div className="sidebar-title">
+              <Trophy size={16} />
+              Top Players
+            </div>
             <div className="leaderboard-preview">
               {leaderboard.slice(0, 5).map((entry, index) => {
                 const entryRank = getRankByLevel(entry.level);
                 return (
-                  <div 
+                  <motion.div 
                     key={entry.userId || `lb-${index}`}
-                    className="leaderboard-item"
+                    className="leaderboard-item glass-hover"
                     onClick={() => setShowLeaderboard(true)}
+                    whileHover={{ x: 4 }}
                   >
                     <div className={`leaderboard-rank ${index < 3 ? 'top' : ''}`}>
                       {index === 0 ? '👑' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`}
@@ -276,19 +359,23 @@ export default function Lobby() {
                       </div>
                     </div>
                     <div className="leaderboard-score">{entry.totalScore}</div>
-                  </div>
+                  </motion.div>
                 );
               })}
             </div>
-          </div>
+          </motion.div>
         </aside>
 
         {/* Main Content */}
         <main className="lobby-content">
           {/* Top Bar */}
-          <div className="lobby-top-bar">
-            <div className="search-bar">
-              <Search size={20} color="rgba(255,255,255,0.5)" />
+          <motion.div 
+            className="lobby-top-bar glass"
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <div className="search-bar glass">
+              <Search size={20} />
               <input
                 type="text"
                 placeholder="Search rooms..."
@@ -298,69 +385,92 @@ export default function Lobby() {
             </div>
 
             <div className="lobby-filters">
-              <button
-                className={`filter-tab ${filter === 'all' ? 'active' : ''}`}
+              <motion.button
+                className={`filter-tab glass ${filter === 'all' ? 'active' : ''}`}
                 onClick={() => setFilter('all')}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
               >
                 All
-              </button>
-              <button
-                className={`filter-tab ${filter === 'public' ? 'active' : ''}`}
+              </motion.button>
+              <motion.button
+                className={`filter-tab glass ${filter === 'public' ? 'active' : ''}`}
                 onClick={() => setFilter('public')}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
               >
                 <Globe size={16} />
                 Public
-              </button>
-              <button
-                className={`filter-tab ${filter === 'private' ? 'active' : ''}`}
+              </motion.button>
+              <motion.button
+                className={`filter-tab glass ${filter === 'private' ? 'active' : ''}`}
                 onClick={() => setFilter('private')}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
               >
                 <Lock size={16} />
                 Private
-              </button>
+              </motion.button>
             </div>
 
-            <button 
-              className="create-room-desktop-btn"
+            <motion.button 
+              className="create-room-desktop-btn glass"
               onClick={() => setShowCreateModal(true)}
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
             >
               <Plus size={20} />
               <span>Create Room</span>
-            </button>
-          </div>
+            </motion.button>
+          </motion.div>
 
           {/* Room List */}
           <div className="rooms-list">
             {loading ? (
               <div className="rooms-loading">
-                <div className="loader"></div>
+                <motion.div 
+                  className="loader"
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                />
                 <p>Loading rooms...</p>
               </div>
             ) : filteredRooms.length === 0 ? (
-              <div className="rooms-empty">
+              <motion.div 
+                className="rooms-empty glass"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+              >
+                <Sparkles size={48} className="empty-icon" />
                 <p>No rooms found</p>
                 <Button variant="secondary" onClick={() => setShowCreateModal(true)}>
                   Create Room
                 </Button>
-              </div>
+              </motion.div>
             ) : (
               <AnimatePresence>
                 {filteredRooms.map((room, index) => (
                   <motion.div
                     key={room.id}
-                    className="room-card"
+                    className="room-card glass"
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
                     transition={{ delay: index * 0.05 }}
+                    whileHover={{ scale: 1.02, y: -4 }}
                     onClick={() => handleJoinRoom(room)}
                   >
                     <div className="room-header">
                       <h3>{room.name}</h3>
                       <div className="room-badges">
                         {room.isPrivate ? (
-                          <span className="room-badge private"><Lock size={14} /></span>
+                          <span className="room-badge private glass">
+                            <Lock size={14} />
+                          </span>
                         ) : (
-                          <span className="room-badge public"><Globe size={14} /></span>
+                          <span className="room-badge public glass">
+                            <Globe size={14} />
+                          </span>
                         )}
                       </div>
                     </div>
@@ -368,7 +478,7 @@ export default function Lobby() {
                     <div className="room-info">
                       <div className="room-stat">
                         <Users size={16} />
-                        <span>{room.players}/{room.maxPlayers}</span>
+                        <span>{room.playerCount}/{room.maxPlayers}</span>
                       </div>
                       <div className="room-stat">
                         <Zap size={16} />
@@ -376,27 +486,31 @@ export default function Lobby() {
                       </div>
                     </div>
                     
-                    <div className="room-progress">
-                      <div 
+                    <div className="room-progress glass">
+                      <motion.div 
                         className="progress-fill"
+                        initial={{ width: 0 }}
+                        animate={{ width: `${(room.playerCount / room.maxPlayers) * 100}%` }}
+                        transition={{ duration: 0.5 }}
                         style={{ 
-                          width: `${(room.players / room.maxPlayers) * 100}%`,
-                          background: room.players >= room.maxPlayers ? '#ef4444' : undefined
+                          background: room.playerCount >= room.maxPlayers 
+                            ? 'var(--error)' 
+                            : `linear-gradient(90deg, var(--accent-primary), var(--accent-secondary))`
                         }}
-                      ></div>
+                      />
                     </div>
                     
                     <Button 
                       variant="primary" 
                       size="sm" 
                       className="join-btn"
-                      disabled={room.players >= room.maxPlayers}
+                      disabled={room.playerCount >= room.maxPlayers}
                       onClick={(e) => {
                         e.stopPropagation();
                         handleJoinRoom(room);
                       }}
                     >
-                      {room.players >= room.maxPlayers ? 'Full' : (
+                      {room.playerCount >= room.maxPlayers ? 'Full' : (
                         <><Play size={16} /> Join</>
                       )}
                     </Button>
@@ -409,14 +523,15 @@ export default function Lobby() {
       </div>
 
       {/* Floating Create Button (Mobile) */}
-      <button 
-        className="create-room-btn"
+      <motion.button 
+        className="create-room-btn glass"
         onClick={() => setShowCreateModal(true)}
         aria-label="Create room"
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.9 }}
       >
         <Plus size={28} color="white" />
-      </button>
-
+      </motion.button>
 
       {/* Leaderboard Modal */}
       <AnimatePresence>
@@ -426,51 +541,24 @@ export default function Lobby() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              background: 'rgba(0,0,0,0.8)',
-              zIndex: 100,
-              display: 'flex',
-              alignItems: 'flex-end'
-            }}
+            className="modal-overlay"
             onClick={() => setShowLeaderboard(false)}
           >
-
             <motion.div
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              style={{
-                width: '100%',
-                maxHeight: '80vh',
-                background: '#0D1B2A',
-                borderRadius: '24px 24px 0 0',
-                padding: '20px',
-                overflow: 'auto'
-              }}
+              className="leaderboard-modal glass"
               onClick={e => e.stopPropagation()}
             >
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: '20px'
-              }}>
-                <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Trophy size={24} color="#00F5D4" />
+              <div className="leaderboard-header">
+                <h2>
+                  <Trophy size={24} />
                   Top Players
                 </h2>
                 <button 
+                  className="close-btn glass"
                   onClick={() => setShowLeaderboard(false)}
-                  style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '50%',
-                    background: 'rgba(255,255,255,0.1)',
-                    border: 'none',
-                    color: 'white'
-                  }}
                 >
                   ✕
                 </button>
@@ -479,41 +567,28 @@ export default function Lobby() {
               {leaderboard.map((entry, index) => {
                 const entryRank = getRankByLevel(entry.level);
                 return (
-                  <div 
+                  <motion.div 
                     key={entry.userId}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '12px',
-                      padding: '16px',
-                      background: 'rgba(255,255,255,0.05)',
-                      borderRadius: '12px',
-                      marginBottom: '8px',
-                      border: entry.userId === user?.id ? '1px solid #00F5D4' : 'none'
-                    }}
+                    className={`leaderboard-row glass-hover ${entry.userId === user?.id ? 'current-user' : ''}`}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: index * 0.05 }}
                   >
-                    <div style={{ 
-                      width: '32px',
-                      fontSize: '1.25rem',
-                      fontWeight: 700,
-                      color: index < 3 ? '#00F5D4' : 'rgba(255,255,255,0.5)'
-                    }}>
+                    <div className={`leaderboard-rank ${index < 3 ? 'top' : ''}`}>
                       {index === 0 ? '👑' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`}
                     </div>
-                    <div style={{ fontSize: '1.5rem' }}>{entry.avatarId || '👤'}</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600 }}>{entry.username}</div>
-                      <div style={{ fontSize: '0.8rem', color: entryRank.color }}>
+                    <div className="leaderboard-avatar">{entry.avatarId || '👤'}</div>
+                    <div className="leaderboard-info">
+                      <div className="leaderboard-name">{entry.username}</div>
+                      <div className="leaderboard-rank-name" style={{ color: entryRank.color }}>
                         {entryRank.icon} {entryRank.name}
                       </div>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontWeight: 700, color: '#00F5D4' }}>{entry.totalScore}</div>
-                      <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)' }}>
-                        Lv.{entry.level}
-                      </div>
+                    <div className="leaderboard-stats">
+                      <div className="leaderboard-score">{entry.totalScore}</div>
+                      <div className="leaderboard-level">Lv.{entry.level}</div>
                     </div>
-                  </div>
+                  </motion.div>
                 );
               })}
             </motion.div>
@@ -528,7 +603,6 @@ export default function Lobby() {
         )}
       </AnimatePresence>
 
-
       {/* Password Modal */}
       <AnimatePresence>
         {showPasswordModal && selectedRoom && (
@@ -537,35 +611,19 @@ export default function Lobby() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              background: 'rgba(0,0,0,0.8)',
-              zIndex: 100,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '20px'
-            }}
+            className="modal-overlay"
             onClick={() => setShowPasswordModal(false)}
           >
-
             <motion.form
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
               onSubmit={handlePasswordSubmit}
-              style={{
-                width: '100%',
-                maxWidth: '320px',
-                background: '#0D1B2A',
-                borderRadius: '20px',
-                padding: '24px'
-              }}
+              className="password-modal glass"
               onClick={e => e.stopPropagation()}
             >
-              <h3 style={{ marginBottom: '8px' }}>Enter Password</h3>
-              <p style={{ color: 'rgba(255,255,255,0.6)', marginBottom: '20px', fontSize: '0.9rem' }}>
+              <h3>Enter Password</h3>
+              <p className="password-subtitle">
                 Room: {selectedRoom.name}
               </p>
               <input
@@ -573,37 +631,21 @@ export default function Lobby() {
                 placeholder="Password"
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '16px',
-                  background: 'rgba(255,255,255,0.05)',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: '12px',
-                  color: 'white',
-                  fontSize: '1rem',
-                  marginBottom: '20px'
-                }}
+                className="password-input"
                 autoFocus
               />
-              <div style={{ display: 'flex', gap: '12px' }}>
+              <div className="password-actions">
                 <Button 
                   variant="ghost" 
                   type="button" 
-                  style={{ flex: 1 }} 
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setShowPasswordModal(false);
-                  }}
+                  onClick={() => setShowPasswordModal(false)}
                 >
                   Cancel
                 </Button>
-                <Button variant="primary" type="submit" style={{ flex: 1 }}>
+                <Button variant="primary" type="submit">
                   Join
                 </Button>
               </div>
-
-
             </motion.form>
           </motion.div>
         )}

@@ -15,7 +15,17 @@ import './LobbyMobile.css';
 
 
 
-interface Room { id: string; name: string; players: number; maxPlayers: number; isPrivate: boolean; gameMode: string; isInGame?: boolean; }
+interface Room { 
+  id: string; 
+  name: string; 
+  hostName?: string;
+  playerCount: number; 
+  maxPlayers: number; 
+  isPrivate: boolean; 
+  gameMode: string; 
+  phase: string;
+}
+
 
 export default function LobbyMobile() {
   const navigate = useNavigate();
@@ -48,9 +58,28 @@ export default function LobbyMobile() {
     try { const res = await api.get('/users/leaderboard?limit=5'); setLeaderboard(res.data.leaderboard); } catch {}
   };
 
-  const fetchRooms = async () => {
-    try { const res = await api.get('/rooms'); setRooms(res.data.rooms || []); } catch {}
+  const fetchRooms = () => {
+    if (!socket) return;
+    socket.emit('lobby:get-rooms');
   };
+
+  useEffect(() => {
+    if (!socket) return;
+
+    socket.on('lobby:rooms', (data: { rooms: Room[] }) => {
+      setRooms(data.rooms || []);
+    });
+
+    socket.on('lobby:rooms-updated', (data: { rooms: Room[] }) => {
+      setRooms(data.rooms || []);
+    });
+
+    return () => {
+      socket.off('lobby:rooms');
+      socket.off('lobby:rooms-updated');
+    };
+  }, [socket]);
+
 
 
   const handleJoinRoom = (room: Room) => {
@@ -59,10 +88,11 @@ export default function LobbyMobile() {
   };
 
   const handleQuickMatch = () => {
-    const available = rooms.find(r => !r.isPrivate && r.players < r.maxPlayers && !r.isInGame);
+    const available = rooms.find(r => !r.isPrivate && r.playerCount < r.maxPlayers && r.phase === 'waiting');
     if (available) navigate(`/room/${available.id}`);
     else setShowCreateModal(true);
   };
+
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,11 +104,12 @@ export default function LobbyMobile() {
   const handleRoomCodeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!roomCodeInput.trim()) return;
-    const code = roomCodeInput.trim().toLowerCase();
-    navigate(`/room/room-${code}`, { state: { joinByCode: true } });
+    const code = roomCodeInput.trim().toUpperCase();
+    navigate(`/room/${code}`, { state: { joinByCode: true } });
     setShowRoomCodeModal(false);
     setRoomCodeInput('');
   };
+
 
   const filteredRooms = rooms.filter(r => r.name.toLowerCase().includes(searchQuery.toLowerCase()));
   const rank = getRankByLevel(user?.level || 1);
@@ -208,18 +239,20 @@ export default function LobbyMobile() {
                 </div>
                 <div className="room-meta">
                   <Users size={12} />
-                  <span>{room.players}/{room.maxPlayers}</span>
+                  <span>{room.playerCount}/{room.maxPlayers}</span>
+
                   <span className="divider">•</span>
                   <span className="game-mode">{room.gameMode}</span>
                 </div>
               </div>
               <button 
-                className={`join-btn-compact ${room.players >= room.maxPlayers ? 'full' : ''}`}
-                disabled={room.players >= room.maxPlayers}
+                className={`join-btn-compact ${room.playerCount >= room.maxPlayers ? 'full' : ''}`}
+                disabled={room.playerCount >= room.maxPlayers}
                 onClick={(e) => { e.stopPropagation(); handleJoinRoom(room); }}
               >
-                {room.players >= room.maxPlayers ? 'Full' : <Play size={14} />}
+                {room.playerCount >= room.maxPlayers ? 'Full' : <Play size={14} />}
               </button>
+
             </motion.div>
           ))
         )}

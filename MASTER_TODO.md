@@ -57,7 +57,6 @@
 
 #### 1.5 Settings System
 - [ ] **Server-Side Settings**: Persist all settings to database
-- [ ] **Theme System**: Multiple themes beyond dark/light
 - [ ] **Audio Settings**: Volume controls, mute options
 - [ ] **Accessibility**: Colorblind mode, high contrast, screen reader support
 

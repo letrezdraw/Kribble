@@ -67,14 +67,14 @@ export default function CreateRoomMobile({ onClose }: CreateRoomMobileProps) {
   useEffect(() => {
     if (!socket) return;
 
-    const handleRoomCreated = (response: { room?: { id: string }; password?: string }) => {
+    const handleRoomCreated = (response: { room?: { id: string }; userId?: string; isHost?: boolean }) => {
       if (response.room?.id) {
-
         setLoading(false);
-        navigate(`/room/${response.room.id}`, { state: { password: response.password } });
+        navigate(`/room/${response.room.id}`);
         onClose();
       }
     };
+
 
     socket.on('room:created', handleRoomCreated);
     return () => {

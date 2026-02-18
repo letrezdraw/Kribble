@@ -19,7 +19,8 @@ import { authRoutes, cleanupExpiredGuests } from './routes/auth.js';
 import { roomRoutes } from './routes/rooms.js';
 import { userRoutes } from './routes/users.js';
 import { wordRoutes } from './routes/words.js';
-import { setupSocketHandlers } from './socket/handlers.js';
+import { setupSocketHandlers } from './socket/handlers-v2.js';
+
 import { initDatabase } from './db/index.js';
 import { startCleanupScheduler } from './data/rooms.js';
 import { logger } from './utils/logger.js';

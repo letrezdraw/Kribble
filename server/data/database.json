@@ -40,6 +40,18 @@
       "level": 1,
       "xp": 0,
       "created_at": "2026-02-14T09:47:42.209Z"
+    },
+    "16747eb5-4c4a-4934-b660-1770fceab2cf": {
+      "id": "16747eb5-4c4a-4934-b660-1770fceab2cf",
+      "username": "rfg",
+      "email": "guest-16747eb5-4c4a-4934-b660-1770fceab2cf@kribble.local",
+      "password": "",
+      "avatar_id": "👤",
+      "level": 1,
+      "xp": 0,
+      "is_guest": true,
+      "expires_at": "2026-02-19T04:33:43.511Z",
+      "created_at": "2026-02-18T04:33:43.512Z"
     }
   },
   "wordCategories": [
@@ -507,6 +519,19 @@
       "best_streak": 1,
       "last_played_at": "2026-02-17T04:53:21.290Z",
       "updated_at": "2026-02-17T04:53:21.290Z"
+    },
+    "player-760caa55-6e31-4395-affb-b557c7bc1568": {
+      "user_id": "player-760caa55-6e31-4395-affb-b557c7bc1568",
+      "games_played": 1,
+      "games_won": 1,
+      "total_score": 0,
+      "words_drawn": 1,
+      "words_guessed": 0,
+      "total_play_time": 9,
+      "current_streak": 1,
+      "best_streak": 1,
+      "last_played_at": "2026-02-18T04:43:41.220Z",
+      "updated_at": "2026-02-18T04:43:41.222Z"
     }
   },
   "match_history": [
@@ -559,6 +584,16 @@
       "play_time": 0,
       "won": false,
       "played_at": "2026-02-17T04:53:21.291Z"
+    },
+    {
+      "id": "cc95d30c-e1a4-42ea-ad51-4b4242d47816",
+      "user_id": "player-760caa55-6e31-4395-affb-b557c7bc1568",
+      "score": 0,
+      "words_guessed": 0,
+      "words_drawn": 1,
+      "play_time": 0,
+      "won": false,
+      "played_at": "2026-02-18T04:43:41.229Z"
     }
   ],
   "daily_challenges": {},

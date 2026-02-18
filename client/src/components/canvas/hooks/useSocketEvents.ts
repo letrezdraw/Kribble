@@ -73,20 +73,51 @@ export function useSocketEvents({
   }, []);
 
   useEffect(() => {
-    if (!socket) return;
+    console.log('[SOCKET] useSocketEvents effect running, socket exists:', !!socket);
+    if (!socket) {
+      console.log('[SOCKET] No socket, skipping event registration');
+      return;
+    }
 
+    console.log('[SOCKET] Registering draw:stroke listener');
     const handleDrawStroke = (data: { playerId: string; stroke: Stroke }) => {
-      if (data.playerId === socket.id) return;
+
+      // Server already excludes sender with socket.to(), no need to filter
+      console.log('[DRAW] Received stroke from player:', data.playerId, 'strokeId:', data.stroke?.id);
+      console.log('[DRAW] My socket.id:', socket.id);
+      console.log('[DRAW] Canvas context exists:', !!staticCtxRef.current);
+      console.log('[DRAW] Stroke data:', {
+        tool: data.stroke?.tool,
+        points: data.stroke?.points?.length,
+        color: data.stroke?.color,
+        size: data.stroke?.size
+      });
+      
+      if (!staticCtxRef.current) {
+        console.error('[DRAW] ERROR: staticCtxRef.current is null!');
+        return;
+      }
+      
+      if (!data.stroke || !data.stroke.points || data.stroke.points.length === 0) {
+        console.error('[DRAW] ERROR: Invalid stroke data!', data.stroke);
+        return;
+      }
+      
       canvasStateRef.current.strokes.push(data.stroke);
-      drawStroke(staticCtxRef.current!, data.stroke);
+      drawStroke(staticCtxRef.current, data.stroke);
+      console.log('[DRAW] Stroke drawn successfully');
     };
+
+
+
 
     const handleDrawStrokeBinary = (buffer: Uint8Array) => {
       try {
         const decoded = decodeMessage<{ playerId: string; stroke: (string | number)[] }>(buffer);
-        if (decoded.playerId === socket.id) return;
+        // Server already excludes sender with socket.to(), no need to filter
         
         const expanded = expandStroke(decoded.stroke);
+
         // Map expanded properties to Stroke type (width -> size)
         const stroke: Stroke = {
           id: expanded.id,
@@ -95,8 +126,8 @@ export function useSocketEvents({
           color: expanded.color,
           size: expanded.width, // Map width to size
           opacity: expanded.opacity,
-          timestamp: Date.now(),
         };
+
         canvasStateRef.current.strokes.push(stroke);
         drawStroke(staticCtxRef.current!, stroke);
       } catch (error) {
@@ -107,11 +138,12 @@ export function useSocketEvents({
 
 
     const handleDrawStrokeChunk = (data: { playerId: string; points: Point[]; tool: ToolType; color: string; size: number }) => {
-      if (data.playerId === socket.id) return;
+      // Server already excludes sender with socket.to(), no need to filter
       if (liveCtxRef.current) {
         renderChunkToCanvas(liveCtxRef.current, data.points, data.tool, data.color, data.size);
       }
     };
+
 
     const handleDrawClear = () => {
       if (!staticCtxRef.current) return;
@@ -157,8 +189,20 @@ export function useSocketEvents({
       }
     };
 
+    const handleCanvasHistory = (data: { strokes: Stroke[] }) => {
+      if (data.strokes?.length > 0) {
+        canvasStateRef.current.strokes = data.strokes;
+        canvasStateRef.current.redoStack = [];
+        redrawAllStrokes(staticCtxRef.current!, data.strokes);
+      }
+    };
+
+    console.log('[SOCKET] Attaching socket listeners...');
     socket.on('draw:stroke', handleDrawStroke);
+    console.log('[SOCKET] draw:stroke listener attached');
+
     socket.on('draw:stroke:binary', handleDrawStrokeBinary);
+
     socket.on('draw:stroke:chunk', handleDrawStrokeChunk);
 
     socket.on('draw:clear', handleDrawClear);
@@ -166,8 +210,10 @@ export function useSocketEvents({
     socket.on('draw:undo', handleDrawUndo);
     socket.on('draw:redo', handleDrawRedo);
     socket.on('canvas:sync', handleCanvasSync);
+    socket.on('canvas:history', handleCanvasHistory);
 
     return () => {
+      console.log('[SOCKET] Cleaning up socket listeners');
       socket.off('draw:stroke', handleDrawStroke);
       socket.off('draw:stroke:binary', handleDrawStrokeBinary);
       socket.off('draw:stroke:chunk', handleDrawStrokeChunk);
@@ -177,6 +223,9 @@ export function useSocketEvents({
       socket.off('draw:undo', handleDrawUndo);
       socket.off('draw:redo', handleDrawRedo);
       socket.off('canvas:sync', handleCanvasSync);
+      socket.off('canvas:history', handleCanvasHistory);
     };
+
+
   }, [socket, staticCtxRef, liveCtxRef, canvasStateRef, clearLiveCanvas, onClear, onUndo, onRedo, renderChunkToCanvas]);
 }

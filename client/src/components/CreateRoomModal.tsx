@@ -57,15 +57,16 @@ export default function CreateRoomModal({ onClose }: CreateRoomModalProps) {
     
     socket.emit('room:create', roomData);
     
-    socket.once('room:created', (response: { room?: { id: string }; currentPlayerId?: string; password?: string }) => {
+    socket.once('room:created', (response: { room?: { id: string }; userId?: string; isHost?: boolean }) => {
       setLoading(false);
       if (response.room?.id) {
-        navigate(`/room/${response.room.id}`, { state: { password: response.password } });
+        navigate(`/room/${response.room.id}`);
         onClose();
       } else {
         alert('Failed to create room');
       }
     });
+
   };
 
   return (
