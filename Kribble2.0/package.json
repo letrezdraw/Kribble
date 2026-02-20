@@ -4,14 +4,17 @@
   "description": "Doodle game - server and client",
   "scripts": {
     "install:all": "npm install && npm run install:server && npm run install:client",
-    "install:server": "cd doodle-server-main && npm install",
-    "install:client": "cd doodle-client-main && npm install",
+    "install:server": "cd Kribble-Server && npm install",
+    "install:client": "cd Kribble-Client && npm install",
+
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
-    "dev:server": "cd doodle-server-main && npm run dev",
-    "dev:client": "cd doodle-client-main && npm start",
+    "dev:server": "cd Kribble-Server && npm run dev",
+    "dev:client": "cd Kribble-Client && npm start",
+
     "build": "npm run build:server",
-    "build:server": "cd doodle-server-main && npm run build",
-    "start": "cd doodle-server-main && npm start"
+    "build:server": "cd Kribble-Server && npm run build",
+    "start": "cd Kribble-Server && npm start"
+
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

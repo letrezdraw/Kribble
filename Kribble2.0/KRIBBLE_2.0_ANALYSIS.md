@@ -1,6 +1,7 @@
 # Kribble 2.0 - Comprehensive Analysis Document
 
-> This document provides a detailed analysis of the Kribble 2.0 codebase (also known as doodle-client-main/doodle-server-main).
+> This document provides a detailed analysis of the Kribble 2.0 codebase (also known as Kribble-Client/Kribble-Server).
+
 
 ---
 
@@ -31,7 +32,8 @@ Kribble 2.0 is a Pictionary-style multiplayer drawing and guessing game. It feat
 
 ## Tech Stack
 
-### Server (doodle-server-main)
+### Server (Kribble-Server)
+
 
 | Technology | Version | Purpose |
 |------------|---------|---------|
@@ -48,7 +50,8 @@ Kribble 2.0 is a Pictionary-style multiplayer drawing and guessing game. It feat
 - `npm run build` - TypeScript compilation
 - `npm run start` - Production build and start
 
-### Client (doodle-client-main)
+### Client (Kribble-Client)
+
 
 | Technology | Version | Purpose |
 |------------|---------|---------|
@@ -73,8 +76,9 @@ Kribble 2.0 is a Pictionary-style multiplayer drawing and guessing game. It feat
 ### Server Structure
 
 ```
-doodle-server-main/
+Kribble-Server/
 ├── src/
+
 │   ├── app.ts                    # Main server entry point
 │   ├── constants/
 │   │   ├── events/
@@ -124,8 +128,9 @@ doodle-server-main/
 ### Client Structure
 
 ```
-doodle-client-main/
+Kribble-Client/
 ├── src/
+
 │   ├── App.tsx                   # Main app component
 │   ├── index.tsx                 # React entry point
 │   ├── assets/
@@ -773,4 +778,4 @@ The codebase is production-ready with Docker support, proper error handling, and
 ---
 
 *Document generated from analysis of Kribble 2.0 codebase*
-*Version: 2.0 (doodle-client-main / doodle-server-main)*
+*Version: 2.0 (Kribble-Client / Kribble-Server)*

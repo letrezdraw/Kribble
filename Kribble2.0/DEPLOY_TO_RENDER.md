@@ -125,7 +125,8 @@ If you want to connect manually (e.g., for debugging):
 3. Connect your repository
 4. Configure:
    - **Name**: `kribble-2`
-   - **Root Directory**: `doodle-server-main`
+   - **Root Directory**: `Kribble-Server`
+
    - **Runtime**: Docker
    - **Dockerfile Path**: `./Dockerfile`
    - **Port**: 5000
@@ -157,12 +158,14 @@ If you want to connect manually (e.g., for debugging):
 
 **Build Failures**:
 - Check the build logs in Render dashboard
-- Ensure `doodle-client-main` folder exists and has package.json
-- Verify the Dockerfile can access `../doodle-client-main`
+- Ensure `Kribble-Client` folder exists and has package.json
+- Verify the Dockerfile can access `../Kribble-Client`
+
 
 **404 Errors on Refresh**:
 - This is handled by the catch-all route in `app.ts`
-- If it doesn't work, check that the build folder exists at `../doodle-client-main/build`
+- If it doesn't work, check that the build folder exists at `../Kribble-Client/build`
+
 
 **CORS Errors**:
 - With single service, CORS should not be an issue
@@ -177,13 +180,14 @@ On Render's free tier:
 
 ## Files Changed for Deployment
 
-1. `doodle-client-main/package.json` - Added `build:production` script
-2. `doodle-server-main/src/app.ts` - Added static file serving, `/health` endpoint, database initialization
-3. `doodle-server-main/Dockerfile` - Multi-stage build that includes client build
-4. `doodle-server-main/package.json` - Added `pg` and `@types/pg` dependencies
-5. `doodle-server-main/src/services/db/DatabaseService.ts` - PostgreSQL database service
+1. `Kribble-Client/package.json` - Added `build:production` script
+2. `Kribble-Server/src/app.ts` - Added static file serving, `/health` endpoint, database initialization
+3. `Kribble-Server/Dockerfile` - Multi-stage build that includes client build
+4. `Kribble-Server/package.json` - Added `pg` and `@types/pg` dependencies
+5. `Kribble-Server/src/services/db/DatabaseService.ts` - PostgreSQL database service
 6. `render.yaml` - Single service + PostgreSQL database configuration
 7. `DEPLOY_TO_RENDER.md` - This guide
+
 
 
 ## Next Steps

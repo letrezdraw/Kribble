@@ -4,13 +4,15 @@ FROM node:18-alpine AS client-build
 WORKDIR /app/client
 
 # Copy and install client dependencies
-COPY Kribble2.0/doodle-client-main/package*.json ./
+COPY Kribble2.0/Kribble-Client/package*.json ./
+
 
 
 RUN npm install
 
 # Copy client source and build
-COPY Kribble2.0/doodle-client-main/. ./
+COPY Kribble2.0/Kribble-Client/. ./
+
 
 
 RUN npm run build
@@ -21,13 +23,15 @@ FROM node:23-alpine AS server-build
 WORKDIR /app
 
 # Copy server dependencies and install
-COPY Kribble2.0/doodle-server-main/package*.json ./
+COPY Kribble2.0/Kribble-Server/package*.json ./
+
 
 
 RUN npm install
 
 # Copy server source and build
-COPY Kribble2.0/doodle-server-main/. ./
+COPY Kribble2.0/Kribble-Server/. ./
+
 
 
 RUN npm run build
@@ -43,7 +47,8 @@ COPY --from=server-build /app/node_modules ./node_modules
 COPY --from=server-build /app/package*.json ./
 
 # Copy client built files
-COPY --from=client-build /app/client/build ./doodle-client-main/build
+COPY --from=client-build /app/client/build ./Kribble-Client/build
+
 
 # Expose port for backend
 EXPOSE 5000
