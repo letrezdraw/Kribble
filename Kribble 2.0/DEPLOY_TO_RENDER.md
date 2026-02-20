@@ -109,7 +109,8 @@ If you want to connect manually (e.g., for debugging):
    - Visit https://dashboard.render.com
    - Click "New" → "Blueprint"
    - Connect your GitHub repository
-   - Select the `Kribble 2.0` folder (or root if that's where `render.yaml` is)
+   - Select the root folder (where `render.yaml` is located)
+
 
 3. **Render will automatically:**
    - Create a single web service (`kribble-2`)
