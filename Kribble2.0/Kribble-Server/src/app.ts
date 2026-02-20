@@ -22,15 +22,18 @@ const app: Application = express();
 const httpServer = createServer(app);
 
 // Serve static files from the React build directory
-app.use(express.static(path.join(__dirname, '../../doodle-client-main/build')));
+app.use(express.static(path.join(__dirname, '../../Kribble-Client/build')));
 
 const allowedOrigins = [
   process.env.DOODLE_CLIENT_URL,
-  process.env.NETLIFY_DOODLE_CLIENT_URL
-];
+  process.env.NETLIFY_DOODLE_CLIENT_URL,
+  'https://kribble.onrender.com',
+  'http://localhost:5000',
+  'http://localhost:3000'
+].filter(Boolean);
 
 const isOriginAllowed = (origin?: string) =>
-  origin && allowedOrigins.includes(origin);
+  !origin || allowedOrigins.includes(origin) || allowedOrigins.some(allowed => origin?.includes('onrender.com'));
 
 app.use(
   cors({
@@ -81,7 +84,7 @@ app.get('/health', (req, res) => {
 
 // Catch-all handler: serve React app for any non-API route
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../../doodle-client-main/build', 'index.html'));
+  res.sendFile(path.join(__dirname, '../../Kribble-Client/build', 'index.html'));
 });
 
 // Listen to port
