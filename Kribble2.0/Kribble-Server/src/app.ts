@@ -22,7 +22,7 @@ const app: Application = express();
 const httpServer = createServer(app);
 
 // Serve static files from the React build directory
-app.use(express.static(path.join(__dirname, '../../Kribble-Client/build')));
+app.use(express.static(path.join(__dirname, '../Kribble-Client/build')));
 
 const allowedOrigins = [
   process.env.DOODLE_CLIENT_URL,
@@ -84,7 +84,7 @@ app.get('/health', (req, res) => {
 
 // Catch-all handler: serve React app for any non-API route
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../../Kribble-Client/build', 'index.html'));
+  res.sendFile(path.join(__dirname, '../Kribble-Client/build', 'index.html'));
 });
 
 // Listen to port
