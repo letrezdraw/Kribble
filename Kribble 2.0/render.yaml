@@ -1,0 +1,16 @@
+services:
+  # Single Web Service - Backend + Frontend
+  - type: web
+    name: kribble-2
+    runtime: docker
+    rootDir: doodle-server-main
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: PORT
+        value: 5000
+      - key: DOODLE_CLIENT_URL
+        value: http://localhost:5000
+      - key: NODE_ENV
+        value: production
+    healthCheckPath: /health
+    autoDeploy: true

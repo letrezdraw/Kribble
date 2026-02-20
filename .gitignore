@@ -64,3 +64,7 @@ coverage
 # Temporary files
 *.tmp
 *.temp
+
+#orignal files
+Kribble 2.0/server-main (orignal do not edit)
+Kribble 2.0/client-main (orignal do not edit)
