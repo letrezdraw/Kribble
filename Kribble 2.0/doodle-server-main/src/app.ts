@@ -12,6 +12,7 @@ import {
   SocketData
 } from '@/types/socket';
 
+import DatabaseService from './services/db/DatabaseService';
 import SocketServiceInstance from './services/socket/SocketService';
 
 config();
@@ -61,6 +62,11 @@ const io = new Server<
     },
     methods: ['GET', 'post']
   }
+});
+
+// Initialize database
+DatabaseService.initialize().catch(err => {
+  console.error('Failed to initialize database:', err);
 });
 
 // Start the socket service

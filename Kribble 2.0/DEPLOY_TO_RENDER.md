@@ -13,7 +13,86 @@ The single service deployment:
 - Builds the React frontend during Docker build
 - Serves static files from the backend Express server
 - WebSocket (Socket.io) runs on the same port
+- **PostgreSQL database for production data persistence**
 - One URL serves both API and frontend
+
+## Database
+
+Render automatically creates a **free PostgreSQL database** (`kribble-2-db`) with:
+- Rooms table: Stores room data with JSONB
+- Game states table: Stores game state data
+- Automatic cleanup of old rooms (24+ hours)
+- SSL connection in production
+
+### How Database Connection Works
+
+The connection is **automatic** - no manual steps needed:
+
+1. **Render Blueprint** (`render.yaml`) defines the database service:
+   ```yaml
+   - type: postgres
+     name: kribble-2-db
+     ipAllowList: []
+     plan: free
+   ```
+
+2. **Environment variable** `DATABASE_URL` is auto-injected into your web service:
+   ```yaml
+   - key: DATABASE_URL
+     fromDatabase:
+       name: kribble-2-db
+       property: connectionString
+   ```
+
+3. **Server auto-connects** on startup (`app.ts`):
+   ```typescript
+   DatabaseService.initialize()
+   ```
+
+### Verify Database Connection
+
+After deployment, check the logs:
+1. Go to your service dashboard → **Logs** tab
+2. Look for these messages:
+   ```
+   DatabaseService: PostgreSQL pool initialized
+   DatabaseService: Tables initialized
+   ```
+
+### Manual Database Connection (if needed)
+
+If you want to connect manually (e.g., for debugging):
+
+1. **Get connection string** from Render dashboard:
+   - Go to **kribble-2-db** service
+   - Copy the **Internal Database URL** or **External Database URL**
+
+2. **Connect via psql**:
+   ```bash
+   psql "your-database-url-here"
+   ```
+
+3. **View tables**:
+   ```sql
+   \dt
+   SELECT * FROM rooms;
+   SELECT * FROM game_states;
+   ```
+
+### Database Schema
+
+**rooms** table:
+- `id` (VARCHAR(10) PRIMARY KEY)
+- `data` (JSONB) - room configuration, players, settings
+- `created_at` (TIMESTAMP)
+- `updated_at` (TIMESTAMP)
+
+**game_states** table:
+- `room_id` (VARCHAR(10) PRIMARY KEY, FK to rooms)
+- `data` (JSONB) - current game state, scores, turns
+- `updated_at` (TIMESTAMP)
+
+
 
 ## Deployment Steps
 
@@ -98,10 +177,13 @@ On Render's free tier:
 ## Files Changed for Deployment
 
 1. `doodle-client-main/package.json` - Added `build:production` script
-2. `doodle-server-main/src/app.ts` - Added static file serving and `/health` endpoint
+2. `doodle-server-main/src/app.ts` - Added static file serving, `/health` endpoint, database initialization
 3. `doodle-server-main/Dockerfile` - Multi-stage build that includes client build
-4. `render.yaml` - Single service Render Blueprint configuration
-5. `DEPLOY_TO_RENDER.md` - This guide
+4. `doodle-server-main/package.json` - Added `pg` and `@types/pg` dependencies
+5. `doodle-server-main/src/services/db/DatabaseService.ts` - PostgreSQL database service
+6. `render.yaml` - Single service + PostgreSQL database configuration
+7. `DEPLOY_TO_RENDER.md` - This guide
+
 
 ## Next Steps
 
