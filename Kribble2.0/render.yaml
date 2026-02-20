@@ -1,17 +1,17 @@
 services:
   # PostgreSQL Database
   - type: postgres
-    name: kribble-2-db
+    name: kribble-db
     ipAllowList: []
     plan: free
 
   # Single Web Service - Backend + Frontend
   - type: web
-    name: kribble-2
+    name: kribble
     runtime: docker
-    rootDir: Kribble 2.0/doodle-server-main
-
+    rootDir: .
     dockerfilePath: ./Dockerfile
+
     envVars:
       - key: PORT
         value: 5000
@@ -23,6 +23,7 @@ services:
         fromDatabase:
           name: kribble-db
           property: connectionString
+
       - key: USE_DATABASE
         value: "true"
     healthCheckPath: /health

@@ -1,13 +1,13 @@
 services:
   # PostgreSQL Database
   - type: postgres
-    name: kribble-2-db
+    name: kribble-db
     ipAllowList: []
     plan: free
 
   # Single Web Service - Backend + Frontend
   - type: web
-    name: kribble-2
+    name: kribble
     runtime: docker
     rootDir: .
     dockerfilePath: ./Dockerfile
