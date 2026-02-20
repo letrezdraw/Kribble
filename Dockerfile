@@ -4,12 +4,14 @@ FROM node:18-alpine AS client-build
 WORKDIR /app/client
 
 # Copy and install client dependencies
-COPY "Kribble 2.0/doodle-client-main/package*.json" ./
+COPY Kribble\ 2.0/doodle-client-main/package*.json ./
+
 
 RUN npm install
 
 # Copy client source and build
-COPY "Kribble 2.0/doodle-client-main/." ./
+COPY Kribble\ 2.0/doodle-client-main/. ./
+
 
 RUN npm run build
 
@@ -19,12 +21,14 @@ FROM node:23-alpine AS server-build
 WORKDIR /app
 
 # Copy server dependencies and install
-COPY "Kribble 2.0/doodle-server-main/package*.json" ./
+COPY Kribble\ 2.0/doodle-server-main/package*.json ./
+
 
 RUN npm install
 
 # Copy server source and build
-COPY "Kribble 2.0/doodle-server-main/." ./
+COPY Kribble\ 2.0/doodle-server-main/. ./
+
 
 RUN npm run build
 
