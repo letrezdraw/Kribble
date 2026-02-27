@@ -1,7 +1,7 @@
 import '../GameLayout.css';
 
 import { useState } from 'react';
-import { FaPaperPlane, FaUser } from 'react-icons/fa6';
+import { FaUser } from 'react-icons/fa6';
 
 import CanvasProvider from '@/contexts/canvas';
 import { useGame } from '@/contexts/game';
@@ -13,7 +13,7 @@ import { OptionConfig } from '../components/Canvas/useCanvasActions';
 import DetailBar from '../components/DetailBar';
 import DoodlerList from '../components/DoodlerList';
 import HunchList from '../components/HunchList';
-import Main from '../Main';
+import Main, { Toolbar } from '../Main';
 
 interface MobileGameLayoutProps {
   gameComponent: React.ReactNode;
@@ -21,7 +21,6 @@ interface MobileGameLayoutProps {
 
 const MobileGameLayout = ({ gameComponent }: MobileGameLayoutProps) => {
   const [showPlayers, setShowPlayers] = useState(false);
-  const [chatInput, setChatInput] = useState('');
   const { game } = useGame();
   const { user } = useUser();
   const {
@@ -37,13 +36,6 @@ const MobileGameLayout = ({ gameComponent }: MobileGameLayoutProps) => {
     type: undefined,
     brushSize: 5,
   });
-
-  const handleSendMessage = () => {
-    if (chatInput.trim()) {
-      // Message sending logic would go here
-      setChatInput('');
-    }
-  };
 
   return (
     <div className="mobile-game-layout-new">
@@ -104,7 +96,22 @@ const MobileGameLayout = ({ gameComponent }: MobileGameLayoutProps) => {
         {/* Toolbar */}
         {isDrawingPhase && isDrawing && (
           <div className="mobile-toolbar">
-            {/* Toolbar will be rendered by Main component */}
+            <Toolbar
+              optionConfig={optionConfig}
+              setOptionConfig={setOptionConfig}
+              isDrawing={isDrawing}
+              onClear={() => {
+                // Clear handled via socket
+              }}
+              onUndo={() => {
+                // Undo handled via canvas engine
+              }}
+              onRedo={() => {
+                // Redo handled via canvas engine
+              }}
+              canUndo={false}
+              canRedo={false}
+            />
           </div>
         )}
       </div>
@@ -136,19 +143,6 @@ const MobileGameLayout = ({ gameComponent }: MobileGameLayoutProps) => {
       <div className="mobile-chat-section">
         <div className="mobile-chat-messages">
           <HunchList />
-        </div>
-        <div className="mobile-chat-input-area">
-          <input
-            type="text"
-            className="mobile-chat-input"
-            placeholder="Type your guess..."
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-          />
-          <button className="mobile-chat-send-btn" onClick={handleSendMessage}>
-            <FaPaperPlane size={16} />
-          </button>
         </div>
       </div>
     </div>

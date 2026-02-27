@@ -6,7 +6,14 @@ import React, {
   useEffect,
   useRef,
 } from 'react';
-import { FaEraser, FaFillDrip, FaPencilAlt, FaTrash } from 'react-icons/fa';
+import {
+  FaEraser,
+  FaFillDrip,
+  FaPencilAlt,
+  FaRedo,
+  FaTrash,
+  FaUndo,
+} from 'react-icons/fa';
 import { IoMdColorPalette } from 'react-icons/io';
 
 import Tooltip from '@/components/Tooltip';
@@ -32,6 +39,10 @@ export interface ToolbarProps {
   setOptionConfig: React.Dispatch<React.SetStateAction<OptionConfig>>;
   isDrawing: boolean;
   onClear: () => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
 }
 
 interface MainProps extends HTMLAttributes<HTMLDivElement> {
@@ -47,6 +58,10 @@ export const Toolbar = ({
   setOptionConfig,
   isDrawing,
   onClear,
+  onUndo,
+  onRedo,
+  canUndo = false,
+  canRedo = false,
 }: ToolbarProps) => {
   const colorInputRef = useRef<HTMLInputElement>(null);
 
@@ -168,6 +183,67 @@ export const Toolbar = ({
           </button>
         </Tooltip>
       </div>
+
+      {/* Undo/Redo Buttons */}
+      {isDrawing && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            background: 'rgba(255,255,255,0.05)',
+            padding: '0.5rem 1rem',
+            borderRadius: '12px',
+            border: '1px solid rgba(255,255,255,0.1)',
+          }}
+        >
+          <Tooltip label="Undo (Ctrl+Z)">
+            <button
+              onClick={onUndo}
+              disabled={!canUndo}
+              style={{
+                padding: '0.5rem',
+                borderRadius: '8px',
+                border: 'none',
+                background: canUndo
+                  ? 'rgba(255,255,255,0.1)'
+                  : 'rgba(255,255,255,0.05)',
+                color: canUndo ? 'white' : 'rgba(255,255,255,0.3)',
+                cursor: canUndo ? 'pointer' : 'not-allowed',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <FaUndo size={16} />
+            </button>
+          </Tooltip>
+          <Tooltip label="Redo (Ctrl+Y)">
+            <button
+              onClick={onRedo}
+              disabled={!canRedo}
+              style={{
+                padding: '0.5rem',
+                borderRadius: '8px',
+                border: 'none',
+                background: canRedo
+                  ? 'rgba(255,255,255,0.1)'
+                  : 'rgba(255,255,255,0.05)',
+                color: canRedo ? 'white' : 'rgba(255,255,255,0.3)',
+                cursor: canRedo ? 'pointer' : 'not-allowed',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <FaRedo size={16} />
+            </button>
+          </Tooltip>
+        </div>
+      )}
+
       <div
         style={{
           display: 'flex',

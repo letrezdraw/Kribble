@@ -7,7 +7,6 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Loading from '@/components/Loading';
 import { DoodlerEvents, GameEvents, RoomEvents } from '@/constants/Events';
 import texts from '@/constants/texts';
-import CanvasProvider from '@/contexts/canvas';
 import { useGame } from '@/contexts/game';
 import { useRoom } from '@/contexts/room';
 import { useSnackbar } from '@/contexts/snackbar';
@@ -224,15 +223,13 @@ const Game = () => {
 
       {/* Canvas Area - 80vw x 90vh */}
       <div className="game-canvas-area" style={{ position: 'relative' }}>
-        <CanvasProvider>
-          <Main
-            component={game.status === GameStatus.LOBBY ? null : gameComponent}
-            optionConfig={optionConfig}
-            setOptionConfig={setOptionConfig}
-            isDrawing={isDrawing}
-            style={{ position: 'relative', height: '100%' }}
-          />
-        </CanvasProvider>
+        <Main
+          component={game.status === GameStatus.LOBBY ? null : gameComponent}
+          optionConfig={optionConfig}
+          setOptionConfig={setOptionConfig}
+          isDrawing={isDrawing}
+          style={{ position: 'relative', height: '100%' }}
+        />
 
         {/* Glass overlay for lobby - centered over canvas */}
         {game.status === GameStatus.LOBBY && (

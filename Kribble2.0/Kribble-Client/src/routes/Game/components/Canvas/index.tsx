@@ -19,6 +19,7 @@ const Canvas = ({ optionConfig }: CanvasProps) => {
   } = useGame();
   const isMountedRef = useRef(false);
   const pointerConfig = useCanvasActions(optionConfig);
+
   usePointerTracker(canvasRef, pointerConfig);
 
   const handleCanvasResize = async () => {
@@ -30,7 +31,7 @@ const Canvas = ({ optionConfig }: CanvasProps) => {
     canvasRef.current.width = rect.width * dpr;
     canvasRef.current.height = rect.height * dpr;
 
-    // Drawing Handlinga
+    // Drawing Handling
     drawing?.loadOperations([{ actionType: CanvasAction.CLEAR }], false, false);
     if (isMountedRef.current) await drawing?.reloadOperations();
     else await drawing?.loadOperations(canvasOperations, false);
@@ -64,4 +65,5 @@ const Canvas = ({ optionConfig }: CanvasProps) => {
     />
   );
 };
+
 export default Canvas;

@@ -2,10 +2,9 @@
   "parser": "@typescript-eslint/parser",
   "extends": [
     "plugin:react/recommended",
-    "plugin:@typescript-eslint/recommended",
-    "prettier"
+    "plugin:@typescript-eslint/recommended"
   ],
-  "plugins": ["@typescript-eslint", "react", "prettier", "simple-import-sort"],
+  "plugins": ["@typescript-eslint", "react", "simple-import-sort"],
   "parserOptions": {
     "ecmaVersion": 2021,
     "sourceType": "module",
@@ -24,12 +23,6 @@
     }
   },
   "rules": {
-    "prettier/prettier": [
-      "error",
-      {
-        "endOfLine": "auto"
-      }
-    ],
     "react/jsx-filename-extension": [1, { "extensions": [".tsx"] }],
     "react/react-in-jsx-scope": "off",
     "simple-import-sort/imports": "error"
