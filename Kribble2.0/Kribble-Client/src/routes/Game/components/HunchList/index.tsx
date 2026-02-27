@@ -1,7 +1,7 @@
 import {
   ChangeEventHandler,
+  FormEventHandler,
   HTMLAttributes,
-  KeyboardEventHandler,
   useEffect,
   useRef,
   useState,
@@ -16,6 +16,8 @@ import { HunchInterface } from '@/types/models/hunch';
 
 import Hunch from './Hunch';
 
+const MAX_HUNCH_LENGTH = 200;
+
 const HunchList = (props: HTMLAttributes<HTMLDivElement>) => {
   const { room } = useRoom();
   const { asyncEmitEvent, registerEvent, unregisterEvent } = useSocket();
@@ -23,14 +25,14 @@ const HunchList = (props: HTMLAttributes<HTMLDivElement>) => {
   const { roomId } = useParams();
   const listRef = useRef<HTMLUListElement>(null);
   const [hunch, setHunch] = useState('');
+  const [isSending, setIsSending] = useState(false);
   const [hunchList, setHunchList] = useState<HunchInterface[]>([
     { isSystemMessage: true, message: 'Type your guess and press Enter!' },
   ]);
 
-  const handleSendHunch: KeyboardEventHandler<HTMLInputElement> = async (e) => {
-    if (e.key !== 'Enter' || !hunch.trim()) return;
+  const submitHunch = async () => {
+    if (!hunch.trim() || isSending) return;
 
-    // Use roomId from URL params as fallback
     const currentRoomId = room.id || roomId;
 
     if (!currentRoomId) {
@@ -41,24 +43,31 @@ const HunchList = (props: HTMLAttributes<HTMLDivElement>) => {
       return;
     }
 
+    setIsSending(true);
     try {
       const data = await asyncEmitEvent(GameEvents.EMIT_GAME_HUNCH, {
         roomId: currentRoomId,
-        message: hunch.trim(),
+        message: hunch.trim().slice(0, MAX_HUNCH_LENGTH),
       });
       handleOnReceiveHunch(data);
       setHunch('');
-    } catch (error) {
-      console.error('Failed to send hunch:', error);
+    } catch (_error) {
       openSnackbar({
         message: 'Failed to send message. Please try again.',
         color: 'error',
       });
+    } finally {
+      setIsSending(false);
     }
   };
 
+  const handleSubmitHunch: FormEventHandler<HTMLFormElement> = async (e) => {
+    e.preventDefault();
+    await submitHunch();
+  };
+
   const handleChangeHunch: ChangeEventHandler<HTMLInputElement> = (e) => {
-    setHunch(e.target.value);
+    setHunch(e.target.value.slice(0, MAX_HUNCH_LENGTH));
   };
 
   const handleOnReceiveHunch = ({
@@ -81,7 +90,7 @@ const HunchList = (props: HTMLAttributes<HTMLDivElement>) => {
     return () => {
       unregisterEvent(GameEvents.ON_GAME_HUNCH, handleOnReceiveHunch);
     };
-  }, []);
+  }, [registerEvent, unregisterEvent]);
 
   return (
     <div {...props} style={{ height: '100%', ...props.style }}>
@@ -135,9 +144,9 @@ const HunchList = (props: HTMLAttributes<HTMLDivElement>) => {
             listStyle: 'none',
           }}
         >
-          {hunchList.map((hunch, index) => (
+          {hunchList.map((hunchEntry, index) => (
             <Hunch
-              hunch={hunch}
+              hunch={hunchEntry}
               key={index}
               style={{
                 display: 'flex',
@@ -149,9 +158,11 @@ const HunchList = (props: HTMLAttributes<HTMLDivElement>) => {
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
                 hyphens: 'none',
-                justifyContent: hunch.isSystemMessage ? 'center' : 'flex-start',
-                padding: hunch.isSystemMessage ? '0.5rem' : '0.25rem 0',
-                background: hunch.isSystemMessage
+                justifyContent: hunchEntry.isSystemMessage
+                  ? 'center'
+                  : 'flex-start',
+                padding: hunchEntry.isSystemMessage ? '0.5rem' : '0.25rem 0',
+                background: hunchEntry.isSystemMessage
                   ? 'rgba(139, 92, 246, 0.1)'
                   : 'transparent',
                 fontSize: '0.875rem',
@@ -159,7 +170,8 @@ const HunchList = (props: HTMLAttributes<HTMLDivElement>) => {
             />
           ))}
         </ul>
-        <div
+        <form
+          onSubmit={handleSubmitHunch}
           style={{
             display: 'flex',
             flexDirection: 'column',
@@ -169,33 +181,51 @@ const HunchList = (props: HTMLAttributes<HTMLDivElement>) => {
             borderTop: '1px solid rgba(255, 255, 255, 0.1)',
           }}
         >
-          <input
-            type="text"
-            value={hunch}
-            placeholder="Type your guess here..."
-            style={{
-              width: '100%',
-              background: 'rgba(0, 0, 0, 0.3)',
-              borderRadius: '8px',
-              padding: '0.75rem',
-              outline: 'none',
-              fontSize: '0.875rem',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              color: '#ffffff',
-              fontFamily: 'inherit',
-              transition: 'all 0.2s ease',
-            }}
-            onKeyDown={handleSendHunch}
-            onChange={handleChangeHunch}
-            onFocus={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(139, 92, 246, 0.5)';
-              e.currentTarget.style.background = 'rgba(0, 0, 0, 0.4)';
-            }}
-            onBlur={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
-              e.currentTarget.style.background = 'rgba(0, 0, 0, 0.3)';
-            }}
-          />
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <input
+              type="text"
+              value={hunch}
+              maxLength={MAX_HUNCH_LENGTH}
+              aria-label="Chat message"
+              placeholder="Type your guess here..."
+              style={{
+                flex: 1,
+                background: 'rgba(0, 0, 0, 0.3)',
+                borderRadius: '8px',
+                padding: '0.75rem',
+                outline: 'none',
+                fontSize: '0.875rem',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                color: '#ffffff',
+                fontFamily: 'inherit',
+                transition: 'all 0.2s ease',
+              }}
+              onChange={handleChangeHunch}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(139, 92, 246, 0.5)';
+                e.currentTarget.style.background = 'rgba(0, 0, 0, 0.4)';
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                e.currentTarget.style.background = 'rgba(0, 0, 0, 0.3)';
+              }}
+            />
+            <button
+              type="submit"
+              disabled={!hunch.trim() || isSending}
+              style={{
+                border: '1px solid rgba(139, 92, 246, 0.4)',
+                background: 'rgba(139, 92, 246, 0.2)',
+                color: '#fff',
+                borderRadius: '8px',
+                padding: '0.75rem 0.9rem',
+                cursor: !hunch.trim() || isSending ? 'not-allowed' : 'pointer',
+                opacity: !hunch.trim() || isSending ? 0.5 : 1,
+              }}
+            >
+              Send
+            </button>
+          </div>
           <p
             style={{
               fontSize: '0.75rem',
@@ -203,9 +233,9 @@ const HunchList = (props: HTMLAttributes<HTMLDivElement>) => {
               textAlign: 'center',
             }}
           >
-            Press Enter to send
+            Press Enter or use Send ({hunch.length}/{MAX_HUNCH_LENGTH})
           </p>
-        </div>
+        </form>
       </div>
     </div>
   );

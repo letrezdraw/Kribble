@@ -1,6 +1,6 @@
 /**
  * Kribble Server - Production-Ready Express + Socket.io
- * 
+ *
  * Features:
  * - Rate limiting
  * - Helmet security headers
@@ -12,70 +12,74 @@
 
 import 'dotenv/config';
 
-import cors from 'cors';
+import cors, { CorsOptions } from 'cors';
 import express, { NextFunction, Request, Response } from 'express';
 import rateLimit, { RateLimitRequestHandler } from 'express-rate-limit';
 import helmet from 'helmet';
-import pino from 'pino';
 import { createServer } from 'http';
+import pino from 'pino';
 import { Server } from 'socket.io';
 
 import SocketService from '@/services/socket/SocketService';
 
-// ==========================================
-// LOGGER SETUP
-// ==========================================
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
-  transport: process.env.NODE_ENV === 'development' 
-    ? { target: 'pino-pretty', options: { colorize: true } }
-    : undefined,
+  transport:
+    process.env.NODE_ENV === 'development'
+      ? { target: 'pino-pretty', options: { colorize: true } }
+      : undefined
 });
 
-// ==========================================
-// EXPRESS APP SETUP
-// ==========================================
 const app = express();
 const httpServer = createServer(app);
 
-// ==========================================
-// SECURITY MIDDLEWARE
-// ==========================================
+const isProduction = process.env.NODE_ENV === 'production';
+const clientOrigins = (process.env.CLIENT_URL || '*')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowAnyOrigin = clientOrigins.includes('*');
 
-// Helmet security headers
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      connectSrc: ["'self'", 'ws:', 'wss:'],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", 'data:', 'blob:'],
+const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS || 1);
+if (process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', Number.isNaN(trustProxyHops) ? 1 : trustProxyHops);
+}
+
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        connectSrc: ["'self'", 'ws:', 'wss:'],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'blob:']
+      }
     },
-  },
-  crossOriginEmbedderPolicy: false, // Allow Socket.io
-}));
+    crossOriginEmbedderPolicy: false
+  })
+);
 
-// CORS configuration
-const corsOptions = {
-  origin: process.env.CLIENT_URL || '*',
+const corsOptions: CorsOptions = {
+  origin: (origin, callback) => {
+    if (!origin || allowAnyOrigin || clientOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+
+    logger.warn({ origin }, 'Blocked CORS origin');
+    callback(new Error('Origin not allowed by CORS'));
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
+  credentials: !allowAnyOrigin
 };
 
 app.use(cors(corsOptions));
 
-// Rate limiting
 const generalLimiter: RateLimitRequestHandler = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  message: {
-    error: {
-      code: 'RATE_LIMIT_EXCEEDED',
-      message: 'Too many requests, please try again later.',
-    },
-  },
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req: Request, res: Response) => {
@@ -83,45 +87,29 @@ const generalLimiter: RateLimitRequestHandler = rateLimit({
     res.status(429).json({
       error: {
         code: 'RATE_LIMIT_EXCEEDED',
-        message: 'Too many requests, please try again later.',
-      },
+        message: 'Too many requests, please try again later.'
+      }
     });
-  },
-});
-
-// Stricter rate limit for socket connections
-const socketLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 10, // 10 connections per minute
-  skipSuccessfulRequests: true,
+  }
 });
 
 app.use(generalLimiter);
 
-// ==========================================
-// BODY PARSING
-// ==========================================
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ==========================================
-// HEALTH CHECKS
-// ==========================================
-
-// Basic health check
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    version: process.env.npm_package_version || '1.0.0',
+    version: process.env.npm_package_version || '1.0.0'
   });
 });
 
-// Detailed health check
-app.get('/health/detailed', (req, res) => {
+app.get('/health/detailed', (_req, res) => {
   const memoryUsage = process.memoryUsage();
-  
+
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -129,144 +117,177 @@ app.get('/health/detailed', (req, res) => {
     version: process.env.npm_package_version || '1.0.0',
     environment: process.env.NODE_ENV,
     memory: {
-      used: Math.round(memoryUsage.heapUsed / 1024 / 1024) + 'MB',
-      total: Math.round(memoryUsage.heapTotal / 1024 / 1024) + 'MB',
-      rss: Math.round(memoryUsage.rss / 1024 / 1024) + 'MB',
-    },
+      used: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB`,
+      total: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`,
+      rss: `${Math.round(memoryUsage.rss / 1024 / 1024)}MB`
+    }
   });
 });
 
-// ==========================================
-// REQUEST LOGGING
-// ==========================================
 app.use((req, res, next) => {
   const start = Date.now();
-  
+
   res.on('finish', () => {
     const duration = Date.now() - start;
     logger.info({
       method: req.method,
       url: req.url,
       status: res.statusCode,
-      duration: duration + 'ms',
-      ip: req.ip,
+      duration: `${duration}ms`,
+      ip: req.ip
     });
   });
-  
+
   next();
 });
 
-// ==========================================
-// SOCKET.IO SETUP
-// ==========================================
 const io = new Server(httpServer, {
-  cors: corsOptions,
+  cors: {
+    origin: allowAnyOrigin ? true : clientOrigins,
+    methods: ['GET', 'POST'],
+    credentials: !allowAnyOrigin
+  },
   pingTimeout: 60000,
   pingInterval: 25000,
   transports: ['websocket', 'polling'],
-  maxHttpBufferSize: 1e6, // 1MB
+  maxHttpBufferSize: 1e6
 });
 
-// Apply rate limiting to socket connections
+const socketConnectionHistory = new Map<string, number[]>();
+const SOCKET_RATE_WINDOW_MS = 60 * 1000;
+const SOCKET_MAX_CONNECTIONS_PER_WINDOW = 10;
+const SOCKET_RATE_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+
+const pruneSocketHistory = (ip: string, now: number) => {
+  const history = socketConnectionHistory.get(ip) || [];
+  const recentHistory = history.filter(
+    (timestamp) => now - timestamp <= SOCKET_RATE_WINDOW_MS
+  );
+
+  if (recentHistory.length > 0) {
+    socketConnectionHistory.set(ip, recentHistory);
+  } else {
+    socketConnectionHistory.delete(ip);
+  }
+
+  return recentHistory;
+};
+
+setInterval(() => {
+  const now = Date.now();
+  socketConnectionHistory.forEach((_value, ip) => {
+    pruneSocketHistory(ip, now);
+  });
+}, SOCKET_RATE_SWEEP_INTERVAL_MS).unref();
+
 io.use((socket, next) => {
-  // Check connection rate
-  const clientIp = socket.handshake.address;
-  logger.info({ ip: clientIp, id: socket.id }, 'Socket connection attempt');
+  const clientIp = socket.handshake.address || 'unknown';
+  const now = Date.now();
+  const recentHistory = pruneSocketHistory(clientIp, now);
+
+  if (recentHistory.length >= SOCKET_MAX_CONNECTIONS_PER_WINDOW) {
+    logger.warn(
+      { ip: clientIp, id: socket.id },
+      'Socket connection rate limit exceeded'
+    );
+    next(
+      new Error('Too many socket connection attempts. Please retry shortly.')
+    );
+    return;
+  }
+
+  recentHistory.push(now);
+  socketConnectionHistory.set(clientIp, recentHistory);
+
+  logger.info({ ip: clientIp, id: socket.id }, 'Socket connection accepted');
   next();
 });
 
-// ==========================================
-// ERROR HANDLING
-// ==========================================
-
-// 404 handler
 app.use((req, res) => {
   logger.warn({ url: req.url, method: req.method }, 'Route not found');
   res.status(404).json({
     error: {
       code: 'NOT_FOUND',
-      message: 'The requested resource was not found.',
-    },
+      message: 'The requested resource was not found.'
+    }
   });
 });
 
-// Global error handler
-app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
-  logger.error({
-    err: err.message,
-    stack: err.stack,
-    url: req.url,
-    method: req.method,
-  }, 'Unhandled error');
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
 
-  // Don't leak error details in production
-  const isDev = process.env.NODE_ENV === 'development';
-  
+  logger.error(
+    {
+      err: err.message,
+      stack: err.stack,
+      url: req.url,
+      method: req.method
+    },
+    'Unhandled error'
+  );
+
   res.status(500).json({
     error: {
       code: 'INTERNAL_ERROR',
-      message: isDev ? err.message : 'An internal error occurred.',
-      ...(isDev && { stack: err.stack }),
-    },
+      message: isProduction ? 'An internal error occurred.' : err.message,
+      ...(!isProduction && { stack: err.stack })
+    }
   });
 });
 
-// ==========================================
-// UNHANDLED REJECTIONS
-// ==========================================
 process.on('unhandledRejection', (reason, promise) => {
   logger.error({ reason, promise }, 'Unhandled Rejection');
-  // Don't crash, but log it
 });
 
 process.on('uncaughtException', (err) => {
   logger.fatal({ err }, 'Uncaught Exception');
-  // Give logger time to write, then exit
   setTimeout(() => {
     process.exit(1);
   }, 1000);
 });
 
-// ==========================================
-// GRACEFUL SHUTDOWN
-// ==========================================
+let shuttingDown = false;
 const gracefulShutdown = (signal: string) => {
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown = true;
   logger.info({ signal }, 'Starting graceful shutdown...');
-  
-  // Close HTTP server
-  httpServer.close(() => {
-    logger.info('HTTP server closed');
-    
-    // Close Socket.io
-    io.close(() => {
-      logger.info('Socket.io closed');
-      
-      // Exit process
+
+  io.close(() => {
+    logger.info('Socket.io closed');
+
+    httpServer.close(() => {
+      logger.info('HTTP server closed');
       process.exit(0);
     });
   });
 
-  // Force shutdown after 30 seconds
   setTimeout(() => {
     logger.error('Forced shutdown due to timeout');
     process.exit(1);
-  }, 30000);
+  }, 30000).unref();
 };
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-// ==========================================
-// START SERVER
-// ==========================================
-const PORT = process.env.PORT || 3001;
+const PORT = Number(process.env.PORT) || 3001;
 
 httpServer.listen(PORT, () => {
   logger.info(`🚀 Server running on port ${PORT}`);
   logger.info(`📊 Health check: http://localhost:${PORT}/health`);
   logger.info(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
-  
-  // Start socket service
+
   SocketService.start(io);
   logger.info('🔌 Socket.io service started');
+});
+
+httpServer.on('error', (error) => {
+  logger.fatal({ error }, 'Failed to start HTTP server');
+  process.exit(1);
 });

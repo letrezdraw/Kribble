@@ -22,8 +22,10 @@ import { useUser } from '../user';
 
 const socket: SocketType = io(process.env.REACT_APP_DOODLE_SERVER_URL, {
   autoConnect: false,
-  reconnectionAttempts: 2,
+  reconnectionAttempts: 3,
 });
+
+const ACK_TIMEOUT_MS = Number(process.env.REACT_APP_SOCKET_ACK_TIMEOUT_MS || 10000);
 
 export enum SocketConnectionState {
   CONNECTING,
@@ -65,7 +67,7 @@ const SocketProvider = ({ children }: PropsWithChildren) => {
     useState<SocketConnectionState>(SocketConnectionState.CONNECTING);
 
   const handleConnectAttempt = () => {
-    setSocketConnectionState(SocketConnectionState.CONNECTING);
+    setSocketConnectionState(SocketConnectionState.RECONNECTING);
   };
 
   const handleConnect = () => {
@@ -81,6 +83,7 @@ const SocketProvider = ({ children }: PropsWithChildren) => {
 
   const handleDisconnect = () => {
     console.error('Disconnected from server!');
+    setSocketConnectionState(SocketConnectionState.ERROR);
     resetUser();
   };
 
@@ -105,37 +108,54 @@ const SocketProvider = ({ children }: PropsWithChildren) => {
     payload: ClientToServerEventsArgumentMap[T]['payload']
   ) => {
     const data = await (new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new ErrorFromServer('Request timeout. Please try again.'));
+      }, ACK_TIMEOUT_MS);
+
       const args = [
         payload,
         (response) => {
+          clearTimeout(timeout);
           const { data, error } = response;
-          if (process.env.NODE_ENV === 'development')
+          if (process.env.NODE_ENV === 'development') {
             logClientEmit(event, response);
+          }
+
           if (error || data === undefined) {
             reject(new ErrorFromServer(error?.message));
-          } else resolve(data);
+            return;
+          }
+
+          resolve(data);
         },
       ] as Parameters<ClientToServerEvents[T]>;
+
       socket.emit(event, ...args);
     }) as Promise<ClientToServerEventsArgumentMap[T]['response']['data']>);
-    if (!data) throw new ErrorFromServer('Something went wrong!');
+
+    if (!data) {
+      throw new ErrorFromServer('Something went wrong!');
+    }
+
     return data;
   };
 
   useEffect(() => {
+    setSocketConnectionState(SocketConnectionState.CONNECTING);
     socket.on(SocketEvents.ON_CONNECT, handleConnect);
-    // socket.on(SocketEvents.ON_CONNECT_ERROR, handleConnectError);
+    socket.on(SocketEvents.ON_CONNECT_ERROR, handleConnectError);
     socket.on(SocketEvents.ON_DISCONNECT, handleDisconnect);
-    // socket.io.on(SocketIOEvents.ON_RECONNECT, handleConnect);
     socket.io.on(SocketIOEvents.ON_RECONNECT_ATTEMPT, handleConnectAttempt);
     socket.io.on(SocketIOEvents.ON_RECONNECT_FAILED, handleConnectError);
-    handleConnectAttempt();
     socket.connect();
 
     return () => {
       socket.off(SocketEvents.ON_CONNECT, handleConnect);
       socket.off(SocketEvents.ON_CONNECT_ERROR, handleConnectError);
       socket.off(SocketEvents.ON_DISCONNECT, handleDisconnect);
+      socket.io.off(SocketIOEvents.ON_RECONNECT_ATTEMPT, handleConnectAttempt);
+      socket.io.off(SocketIOEvents.ON_RECONNECT_FAILED, handleConnectError);
+      socket.disconnect();
     };
   }, []);
 

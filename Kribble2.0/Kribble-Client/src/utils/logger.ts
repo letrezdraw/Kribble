@@ -17,7 +17,7 @@ interface LogEntry {
 
 class Logger {
   private logs: LogEntry[] = [];
-  private maxLogs: number = 1000;
+  private maxLogs = 1000;
   private componentName: string;
 
   constructor(componentName: string) {

@@ -80,8 +80,8 @@ const PlayForm = ({ roomId, ...props }: PlayFormProps) => {
       e.preventDefault();
       const isSetUser = await handleSetUser();
       if (!isSetUser) return;
-      if (roomId) handleJoinPrivateRoom();
-      else handleJoinPublicRoom();
+      if (roomId) await handleJoinPrivateRoom();
+      else await handleJoinPublicRoom();
     } catch (e) {
       if (e instanceof ErrorFromServer) {
         openSnackbar({ message: e.message, color: 'error' });

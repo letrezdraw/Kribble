@@ -22,7 +22,7 @@ const PrivateLobby = () => {
   const { user } = useUser();
   const { setGame } = useGame();
   const { openSnackbar } = useSnackbar();
-  const { registerEvent, asyncEmitEvent } = useSocket();
+  const { registerEvent, unregisterEvent, asyncEmitEvent } = useSocket();
   const [isLoading, setIsLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [options, setOptions] = useState<PrivateGameOptions>({
@@ -46,15 +46,23 @@ const PrivateLobby = () => {
     }));
   };
 
-  const handleCopyRoomLink = () => {
+  const handleCopyRoomLink = async () => {
     const roomLink = `${window.location.origin}/?roomId=${id}`;
-    navigator.clipboard.writeText(roomLink);
-    setCopied(true);
-    openSnackbar({
-      message: 'Room link copied to clipboard!',
-      color: 'success',
-    });
-    setTimeout(() => setCopied(false), 2000);
+
+    try {
+      await navigator.clipboard.writeText(roomLink);
+      setCopied(true);
+      openSnackbar({
+        message: 'Room link copied to clipboard!',
+        color: 'success',
+      });
+      setTimeout(() => setCopied(false), 2000);
+    } catch (_error) {
+      openSnackbar({
+        message: 'Could not copy room link automatically.',
+        color: 'error',
+      });
+    }
   };
 
   const handleShareRoom = async () => {
@@ -66,11 +74,14 @@ const PrivateLobby = () => {
           text: `Join my private Kribble room with code: ${id}`,
           url: roomLink,
         });
-      } catch (err) {
-        // User cancelled or share failed
+      } catch (_err) {
+        openSnackbar({
+          message: 'Share was cancelled.',
+          color: 'warning',
+        });
       }
     } else {
-      handleCopyRoomLink();
+      await handleCopyRoomLink();
     }
   };
 
@@ -84,15 +95,20 @@ const PrivateLobby = () => {
   }, [options, isOwner, id, asyncEmitEvent]);
 
   useEffect(() => {
-    if (!isOwner) {
-      registerEvent(
-        GameEvents.ON_GAME_UPDATE_PRIVATE_SETTING,
-        ({ options: newOptions }) => {
-          setOptions(newOptions);
-        }
-      );
+    if (isOwner) {
+      return;
     }
-  }, [isOwner, registerEvent]);
+
+    const handleSettingUpdate = ({ options: newOptions }: { options: PrivateGameOptions }) => {
+      setOptions(newOptions);
+    };
+
+    registerEvent(GameEvents.ON_GAME_UPDATE_PRIVATE_SETTING, handleSettingUpdate);
+
+    return () => {
+      unregisterEvent(GameEvents.ON_GAME_UPDATE_PRIVATE_SETTING, handleSettingUpdate);
+    };
+  }, [isOwner, registerEvent, unregisterEvent]);
 
   const handleStart: FormEventHandler = async (e) => {
     e.preventDefault();
@@ -106,8 +122,11 @@ const PrivateLobby = () => {
         }
       );
       setGame(game);
-    } catch (e) {
-      console.error('Failed to start game:', e);
+    } catch (_e) {
+      openSnackbar({
+        message: 'Failed to start game. Please try again.',
+        color: 'error',
+      });
     } finally {
       setIsLoading(false);
     }
@@ -124,7 +143,6 @@ const PrivateLobby = () => {
         padding: '1.5rem',
       }}
     >
-      {/* Room Info Card */}
       <div
         style={{
           background: 'rgba(255, 255, 255, 0.05)',
@@ -159,7 +177,6 @@ const PrivateLobby = () => {
           {id}
         </div>
 
-        {/* Share Buttons */}
         <div
           style={{
             display: 'flex',
@@ -168,7 +185,11 @@ const PrivateLobby = () => {
           }}
         >
           <button
-            onClick={handleCopyRoomLink}
+            type="button"
+            aria-label="Copy room link"
+            onClick={() => {
+              void handleCopyRoomLink();
+            }}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -189,7 +210,11 @@ const PrivateLobby = () => {
             {copied ? 'Copied!' : 'Copy Link'}
           </button>
           <button
-            onClick={handleShareRoom}
+            type="button"
+            aria-label="Share room link"
+            onClick={() => {
+              void handleShareRoom();
+            }}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -210,7 +235,6 @@ const PrivateLobby = () => {
         </div>
       </div>
 
-      {/* Settings Form */}
       <form
         style={{
           display: 'flex',
@@ -238,7 +262,6 @@ const PrivateLobby = () => {
             gap: '1rem',
           }}
         >
-          {/* Drawing Time */}
           <div
             style={{
               background: 'rgba(255, 255, 255, 0.03)',
@@ -290,7 +313,6 @@ const PrivateLobby = () => {
             </select>
           </div>
 
-          {/* Rounds */}
           <div
             style={{
               background: 'rgba(255, 255, 255, 0.03)',
