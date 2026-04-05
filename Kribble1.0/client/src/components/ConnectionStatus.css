@@ -1,0 +1,86 @@
+/* ============================================
+   CONNECTION STATUS COMPONENT
+   ============================================ */
+
+.connection-status {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+}
+
+.status-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.status-banner.reconnecting {
+  background: rgba(245, 158, 11, 0.2);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.3);
+  color: var(--warning);
+}
+
+.status-banner.error {
+  background: rgba(239, 68, 68, 0.2);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.3);
+  color: var(--error);
+}
+
+.status-banner.disconnected {
+  background: rgba(107, 114, 128, 0.2);
+  border-bottom: 1px solid rgba(107, 114, 128, 0.3);
+  color: var(--text-secondary);
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.error-icon {
+  font-size: var(--text-lg);
+}
+
+.close-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: currentColor;
+  font-size: var(--text-xl);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity var(--transition-fast);
+  margin-left: var(--space-2);
+}
+
+.close-btn:hover {
+  opacity: 1;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .status-banner {
+    flex-wrap: wrap;
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-xs);
+  }
+}

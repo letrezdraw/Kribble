@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: kribble-postgres
+    environment:
+      POSTGRES_USER: kribble
+      POSTGRES_PASSWORD: kribble
+      POSTGRES_DB: kribble
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kribble"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: kribble-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Server
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    container_name: kribble-server
+    ports:
+      - "4000:4000"
+    environment:
+      DATABASE_URL: postgresql://kribble:kribble@postgres:5432/kribble
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: dev-secret-change-in-production
+      NODE_ENV: development
+      PORT: 4000
+      CORS_ORIGIN: "*"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./apps/server:/workspace/apps/server
+      - ./packages:/workspace/packages
+    command: npm run dev --workspace=@kribble/server
+
+  # Web Desktop
+  web-desktop:
+    build:
+      context: .
+      dockerfile: apps/web-desktop/Dockerfile
+    container_name: kribble-web-desktop
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:4000
+      VITE_WS_URL: ws://localhost:4000
+    volumes:
+      - ./apps/web-desktop:/workspace/apps/web-desktop
+      - ./packages:/workspace/packages
+    command: npm run dev --workspace=@kribble/web-desktop -- --host 0.0.0.0 --port 5173
+    depends_on:
+      - server
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,18 @@
+{
+  "form": {
+    "buttons": {
+      "createPrivateRoom": "Create private room",
+      "playPublicGame": "Play!"
+    },
+    "input": {
+      "name": {
+        "placeholder": "Type your name"
+      }
+    },
+    "validation": {
+      "error": "Please enter your name",
+      "connect_error": "Server did not respond. Please try again later!"
+    }
+  },
+  "privateRoomBubble": "You are joining a private room - "
+}

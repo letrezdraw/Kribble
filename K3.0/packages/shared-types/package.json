@@ -1,0 +1,13 @@
+{
+  "name": "@kribble/shared-types",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.2.0"
+  }
+}

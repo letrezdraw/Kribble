@@ -1,0 +1,16 @@
+{
+  "name": "@kribble/game-engine",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.2.0"
+  }
+}

@@ -1,0 +1,77 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String?  @unique
+  guestId   String?  @unique
+  username  String   @unique
+  avatar    String?
+  isGuest   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  
+  rooms     RoomPlayer[]
+  stats     Json?
+  
+  @@index([guestId])
+}
+
+model Room {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  maxPlayers  Int      @default(8)
+  isPrivate   Boolean  @default(false)
+  status      RoomStatus @default(LOBBY)
+  
+  players     RoomPlayer[]
+  createdAt   DateTime @default(now())
+}
+
+enum RoomStatus {
+  LOBBY
+  DRAWING
+  GUESSING
+  ROUND_END
+  GAME_END
+}
+
+model RoomPlayer {
+  id        String   @id @default(uuid())
+  userId    String
+  roomId    String
+  isDrawer  Boolean  @default(false)
+  score     Int      @default(0)
+  isReady   Boolean  @default(false)
+  hasGuessedCorrectly Boolean @default(false)
+  
+  user      User     @relation(fields: [userId], references: [id])
+  room      Room     @relation(fields: [roomId], references: [id])
+
+  @@unique([userId, roomId])
+}
+
+model GameHistory {
+  id          String   @id @default(uuid())
+  roomId      String
+  players     Json
+  winnerId    String
+  scores      Json
+  playedAt    DateTime @default(now())
+}
+
+model StrokeLog {
+  id        String   @id @default(uuid())
+  gameId    String
+  userId    String
+  points    Json
+  color     String
+  size      Float
+  timestamp DateTime @default(now())
+}

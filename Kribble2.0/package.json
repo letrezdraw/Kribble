@@ -1,0 +1,22 @@
+{
+  "name": "doodle-monorepo",
+  "version": "1.0.0",
+  "description": "Doodle game - server and client",
+  "scripts": {
+    "install:all": "npm install && npm run install:server && npm run install:client",
+    "install:server": "cd Kribble-Server && npm install",
+    "install:client": "cd Kribble-Client && npm install",
+
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "cd Kribble-Server && npm run dev",
+    "dev:client": "cd Kribble-Client && npm start",
+
+    "build": "npm run build:server",
+    "build:server": "cd Kribble-Server && npm run build",
+    "start": "cd Kribble-Server && npm start"
+
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
