@@ -160,11 +160,26 @@ class GameController implements GameControllerInterface {
     };
 
   public handleGameOnUpdatePrivateSetting: GameControllerInterface['handleGameOnUpdatePrivateSetting'] =
-    (socket) => (payload) => {
+    (socket) => async (payload, respond) => {
       const { roomId, options } = payload;
+      const room = await RoomServiceInstance.findRoomWithDoodler(
+        roomId,
+        socket.id
+      );
+      if (room.ownerId !== socket.id) {
+        throw new DoodleServerError('Invalid action!');
+      }
+      if (!room.gameId) {
+        throw new DoodleServerError('Game not found!');
+      }
+      const game = await GameServiceInstance.updatePrivateLobbyOptions(
+        room.gameId,
+        options
+      );
       socket
         .to(roomId)
         .emit(GameSocketEvents.EMIT_GAME_UPDATE_PRIVATE_SETTING, { options });
+      respond({ data: { game } });
     };
 }
 

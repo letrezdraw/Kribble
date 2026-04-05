@@ -25,6 +25,8 @@
   },
   "scripts": {
     "start": "craco start",
+    "dev": "concurrently -n server,web -c magenta,cyan \"npm run dev:server\" \"craco start\"",
+    "dev:server": "npm --prefix ../Kribble-Server run dev",
     "build": "craco build",
     "build:production": "craco build",
     "test": "craco test",
@@ -51,6 +53,7 @@
     ]
   },
   "devDependencies": {
+    "concurrently": "^8.2.2",
     "@commitlint/cli": "^19.6.1",
     "@commitlint/config-conventional": "^19.6.0",
     "@craco/craco": "^7.1.0",

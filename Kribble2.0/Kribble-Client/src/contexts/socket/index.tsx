@@ -6,7 +6,7 @@ import React, {
   useEffect,
   useState,
 } from 'react';
-import { io } from 'socket.io-client';
+import { io, Socket as IoSocket } from 'socket.io-client';
 
 import { SocketEvents, SocketIOEvents } from '@/constants/Events';
 import useLogger from '@/hooks/useLogger';
@@ -20,11 +20,74 @@ import { ErrorFromServer } from '@/utils/error';
 
 import { useUser } from '../user';
 
-/** Shared client; use `socket.emit` for fire-and-forget events (no ACK timeout). */
-export const socket: SocketType = io(process.env.REACT_APP_DOODLE_SERVER_URL, {
+/**
+ * Local stack: UI on :3000 (CRA), Kribble-Server on :5000.
+ * Do not use the CRA host as the Socket.IO URL: package.json "proxy" often returns 500 for /socket.io (polling + WS).
+ * In browser dev on localhost, we always connect straight to :5000 (CORS allows http://localhost:3000 on the server).
+ */
+const DEFAULT_SERVER_ORIGIN = 'http://localhost:5000';
+
+/** Old docs / env used 3001; server listens on 5000. */
+const STALE_LOCAL_DEV_SOCKET = /localhost:3001\b/;
+
+function isBrowserLocalDev(): boolean {
+  if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') {
+    return false;
+  }
+  const h = window.location.hostname;
+  return h === 'localhost' || h === '127.0.0.1';
+}
+
+function resolveSocketUrl(): string {
+  const raw = process.env.REACT_APP_DOODLE_SERVER_URL?.trim();
+
+  if (isBrowserLocalDev()) {
+    if (raw && STALE_LOCAL_DEV_SOCKET.test(raw)) {
+      console.warn(
+        `[Kribble] REACT_APP_DOODLE_SERVER_URL=${JSON.stringify(raw)} is invalid (port 3001). ` +
+          'Remove it from Windows Environment Variables or .env.local. Using http://localhost:5000.'
+      );
+      return DEFAULT_SERVER_ORIGIN;
+    }
+    if (raw) {
+      return raw;
+    }
+    return DEFAULT_SERVER_ORIGIN;
+  }
+
+  if (raw) return raw;
+
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+
+  return DEFAULT_SERVER_ORIGIN;
+}
+
+const SOCKET_URL = resolveSocketUrl();
+const SOCKET_RECONNECT_ATTEMPTS = Number(
+  process.env.REACT_APP_SOCKET_RECONNECT_ATTEMPTS || 25
+);
+
+/** Shared typed client (ACK required in types for RPC-style emits). */
+export const socket: SocketType = io(SOCKET_URL, {
   autoConnect: false,
-  reconnectionAttempts: 3,
+  reconnectionAttempts: SOCKET_RECONNECT_ATTEMPTS,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 8000,
+  timeout: 20000,
 });
+
+/**
+ * Emit without waiting for a server ACK. Typed `Socket` expects a response handler for every
+ * client→server event; high-frequency events (canvas) must not use `asyncEmitEvent` or ACKs.
+ */
+export const emitFireAndForget = <T extends keyof ClientToServerEvents>(
+  event: T,
+  payload: ClientToServerEventsArgumentMap[T]['payload']
+): void => {
+  (socket as unknown as IoSocket).emit(event as string, payload);
+};
 
 const ACK_TIMEOUT_MS = Number(process.env.REACT_APP_SOCKET_ACK_TIMEOUT_MS || 10000);
 
@@ -62,7 +125,7 @@ const SocketContext = createContext<SocketContextType>({
 });
 
 const SocketProvider = ({ children }: PropsWithChildren) => {
-  const { updateUser, resetUser } = useUser();
+  const { updateUser, clearSocketIdentity } = useUser();
   const { logClientEmit } = useLogger();
   const [socketConnectionState, setSocketConnectionState] =
     useState<SocketConnectionState>(SocketConnectionState.CONNECTING);
@@ -78,14 +141,28 @@ const SocketProvider = ({ children }: PropsWithChildren) => {
   };
 
   const handleConnectError = () => {
+    if (process.env.NODE_ENV === 'development') {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[Kribble] Cannot reach game server at ${SOCKET_URL}. Start Kribble-Server on port 5000, or from Kribble-Client run: npm run dev`
+      );
+    }
     setSocketConnectionState(SocketConnectionState.ERROR);
-    resetUser();
+    clearSocketIdentity();
   };
 
-  const handleDisconnect = () => {
-    console.error('Disconnected from server!');
+  const handleDisconnect = (reason: string) => {
+    if (process.env.NODE_ENV === 'development') {
+      // eslint-disable-next-line no-console
+      console.warn('[socket] disconnected:', reason);
+    }
+    clearSocketIdentity();
+    setSocketConnectionState(SocketConnectionState.RECONNECTING);
+  };
+
+  const handleReconnectFailed = () => {
     setSocketConnectionState(SocketConnectionState.ERROR);
-    resetUser();
+    clearSocketIdentity();
   };
 
   const registerEvent: SocketContextType['registerEvent'] = (
@@ -115,7 +192,7 @@ const SocketProvider = ({ children }: PropsWithChildren) => {
 
       const args = [
         payload,
-        (response) => {
+        (response: ClientToServerEventsArgumentMap[T]['response']) => {
           clearTimeout(timeout);
           const { data, error } = response;
           if (process.env.NODE_ENV === 'development') {
@@ -147,7 +224,7 @@ const SocketProvider = ({ children }: PropsWithChildren) => {
     socket.on(SocketEvents.ON_CONNECT_ERROR, handleConnectError);
     socket.on(SocketEvents.ON_DISCONNECT, handleDisconnect);
     socket.io.on(SocketIOEvents.ON_RECONNECT_ATTEMPT, handleConnectAttempt);
-    socket.io.on(SocketIOEvents.ON_RECONNECT_FAILED, handleConnectError);
+    socket.io.on(SocketIOEvents.ON_RECONNECT_FAILED, handleReconnectFailed);
     socket.connect();
 
     return () => {
@@ -155,7 +232,7 @@ const SocketProvider = ({ children }: PropsWithChildren) => {
       socket.off(SocketEvents.ON_CONNECT_ERROR, handleConnectError);
       socket.off(SocketEvents.ON_DISCONNECT, handleDisconnect);
       socket.io.off(SocketIOEvents.ON_RECONNECT_ATTEMPT, handleConnectAttempt);
-      socket.io.off(SocketIOEvents.ON_RECONNECT_FAILED, handleConnectError);
+      socket.io.off(SocketIOEvents.ON_RECONNECT_FAILED, handleReconnectFailed);
       socket.disconnect();
     };
   }, []);

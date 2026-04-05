@@ -85,10 +85,11 @@ Ensure you have the following installed:
 
    ```env
    PORT=5000
+   CLIENT_URL=http://localhost:3000
    DOODLE_CLIENT_URL=http://localhost:3000
    ```
 
-   Replace `http://localhost:3000` with the actual client URL if needed.
+   `CLIENT_URL`, `DOODLE_CLIENT_URL`, and `NETLIFY_DOODLE_CLIENT_URL` are merged (comma-separated lists allowed). If none are set, CORS defaults to `*`. Replace `http://localhost:3000` with your real client origin in production.
 
 4. Start the development server:
 
@@ -116,7 +117,9 @@ The Socket.IO event system is modular and supports creating custom events to ext
 | Variable      | Description                       | Default Value           |
 |---------------|-----------------------------------|-------------------------|
 | `PORT`        | Port the server runs on           | `5000`                  |
-| `DOODLE_CLIENT_URL` | The URL of the client application | `http://localhost:3000` |
+| `CLIENT_URL` | Comma-separated allowed browser origins (CORS + Socket.IO) | (see `.env.example`) |
+| `DOODLE_CLIENT_URL` | Legacy client origin (merged with `CLIENT_URL`) | `http://localhost:3000` |
+| `NETLIFY_DOODLE_CLIENT_URL` | Extra allowed origin (merged) | — |
 
 Add these variables to a `.env` file in the root directory for local development.
 

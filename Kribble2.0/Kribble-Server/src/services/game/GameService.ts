@@ -274,6 +274,13 @@ class GameService implements GameServiceInterface {
     return gameModel.json;
   }
 
+  public updatePrivateLobbyOptions: GameServiceInterface['updatePrivateLobbyOptions'] =
+    async (gameId, options) => {
+      const gameModel = await this._findGameModel(gameId);
+      gameModel.setDefaultOptions(options);
+      return gameModel.json;
+    };
+
   /**
    * Validate if the message is guessed correctly
    * @param gameId Game id

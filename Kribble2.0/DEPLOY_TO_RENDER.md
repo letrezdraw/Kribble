@@ -132,7 +132,7 @@ If you want to connect manually (e.g., for debugging):
    - **Port**: 5000
 5. Environment Variables (auto-set):
    - `PORT`: 5000
-   - `DOODLE_CLIENT_URL`: `http://localhost:5000`
+   - `CLIENT_URL`: your deployed site origin(s), comma-separated, or `*` while testing (see `Kribble-Server/src/app.ts`)
    - `NODE_ENV`: production
 6. Click "Create Web Service"
 

@@ -1,4 +1,7 @@
 {
+  "connection": {
+    "lost": "Lost connection to the server. Check that the game server is running and try again."
+  },
   "chooseWord": {
     "title": {
       "drawer": "Choose a word",

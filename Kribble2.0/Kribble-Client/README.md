@@ -85,10 +85,10 @@ Ensure you have the following installed:
 3. Create a `.env` file in the root of the project and configure the following environment variables:
 
    ```env
-   REACT_APP_DOODLE_SERVER_URL=http://localhost:4000
+   REACT_APP_DOODLE_SERVER_URL=http://localhost:5000
    ```
 
-   Replace `http://localhost:4000` with the actual server URL if needed.
+   The UI runs on :3000; Socket.IO must target Kribble-Server on :5000 (the CRA dev proxy is not used for sockets).
 
 4. Start the development server:
 
@@ -124,7 +124,7 @@ The Doodle client heavily relies on **Socket.IO** for real-time communication wi
 
 | Variable                 | Description                     | Example                     |
 |--------------------------|---------------------------------|-----------------------------|
-| `REACT_APP_DOODLE_SERVER_URL` | URL for the Socket.IO server backend | `http://localhost:4000`    |
+| `REACT_APP_DOODLE_SERVER_URL` | Socket.IO server URL (Kribble-Server, default :5000) | `http://localhost:5000` |
 
 ---
 

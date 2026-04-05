@@ -2,6 +2,7 @@ import React, {
   ChangeEventHandler,
   FormEventHandler,
   useEffect,
+  useRef,
   useState,
 } from 'react';
 import { FaCheck, FaCopy, FaShare } from 'react-icons/fa6';
@@ -25,6 +26,9 @@ const PrivateLobby = () => {
   const { registerEvent, unregisterEvent, asyncEmitEvent } = useSocket();
   const [isLoading, setIsLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const settingsSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
   const [options, setOptions] = useState<PrivateGameOptions>({
     drawing: 120,
     round: 3,
@@ -86,13 +90,31 @@ const PrivateLobby = () => {
   };
 
   useEffect(() => {
-    if (isOwner) {
-      asyncEmitEvent(GameEvents.EMIT_GAME_UPDATE_PRIVATE_SETTING, {
+    if (!isOwner) return;
+
+    if (settingsSyncTimerRef.current) {
+      clearTimeout(settingsSyncTimerRef.current);
+    }
+
+    settingsSyncTimerRef.current = setTimeout(() => {
+      settingsSyncTimerRef.current = null;
+      void asyncEmitEvent(GameEvents.EMIT_GAME_UPDATE_PRIVATE_SETTING, {
         roomId: id,
         options,
-      });
-    }
-  }, [options, isOwner, id, asyncEmitEvent]);
+      })
+        .then(({ game }) => setGame(game))
+        .catch(() => {
+          /* Transient failures are common during reconnect; avoid noisy UI. */
+        });
+    }, 450);
+
+    return () => {
+      if (settingsSyncTimerRef.current) {
+        clearTimeout(settingsSyncTimerRef.current);
+        settingsSyncTimerRef.current = null;
+      }
+    };
+  }, [options, isOwner, id, asyncEmitEvent, setGame]);
 
   useEffect(() => {
     if (isOwner) {

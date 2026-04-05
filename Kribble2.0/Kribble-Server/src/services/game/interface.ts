@@ -25,6 +25,11 @@ export interface GameServiceInterface {
     gameId: string,
     options: PrivateGameOptions
   ) => Promise<GameInterface>;
+  /** Sync drawing/round options in lobby without resetting game state */
+  updatePrivateLobbyOptions: (
+    gameId: string,
+    options: PrivateGameOptions
+  ) => Promise<GameInterface>;
 
   // SCORE
   getHunchStatus: (gameId: string, message: string) => Promise<HunchStatus>;

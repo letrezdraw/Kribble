@@ -1,4 +1,5 @@
-import { FaLock } from 'react-icons/fa6';
+import { FaLock, FaUserPen } from 'react-icons/fa6';
+import { Link } from 'react-router-dom';
 
 import Loading from '@/components/Loading';
 import Text from '@/components/Text';
@@ -85,8 +86,29 @@ const Home = () => {
           style={{
             textAlign: 'center',
             marginBottom: '2.5rem',
+            position: 'relative',
           }}
         >
+          <Link
+            to="/profile"
+            style={{
+              position: 'absolute',
+              right: 0,
+              top: 0,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              fontSize: '0.8rem',
+              color: 'rgba(255,255,255,0.65)',
+              textDecoration: 'none',
+              padding: '0.35rem 0.65rem',
+              borderRadius: '8px',
+              border: '1px solid rgba(255,255,255,0.12)',
+            }}
+          >
+            <FaUserPen size={14} />
+            Profile
+          </Link>
           <h1
             style={{
               fontSize: isMobile ? '2.5rem' : '3.5rem',

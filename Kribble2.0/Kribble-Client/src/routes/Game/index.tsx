@@ -166,11 +166,19 @@ const Game = () => {
   };
 
   useEffect(() => {
-    if (socketConnectionState !== SocketConnectionState.CONNECTED) {
+    if (socketConnectionState === SocketConnectionState.ERROR) {
+      openSnackbar({
+        message: texts.game.connection.lost,
+        color: 'error',
+        isInfinite: true,
+      });
       returnToHomePage();
       return;
     }
-    handleSetup();
+    if (socketConnectionState !== SocketConnectionState.CONNECTED) {
+      return;
+    }
+    void handleSetup();
   }, [roomId, socketConnectionState]);
 
   const gameComponent = useMemo(() => {

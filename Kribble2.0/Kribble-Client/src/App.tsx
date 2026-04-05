@@ -11,12 +11,17 @@ import SocketProvider from './contexts/socket';
 import UserProvider from './contexts/user';
 import Game from './routes/Game';
 import Home from './routes/Home';
+import Profile from './routes/Profile';
 
 function App() {
   const router = createBrowserRouter([
     {
       path: '/',
       element: <Home />,
+    },
+    {
+      path: '/profile',
+      element: <Profile />,
     },
     {
       path: ':roomId',

@@ -30,14 +30,32 @@ const logger = pino({
       : undefined
 });
 
+/** Split comma-separated origin lists from env (trim, drop empty). */
+function parseOriginsList(...values: (string | undefined)[]): string[] {
+  const out: string[] = [];
+  for (const v of values) {
+    if (!v?.trim()) continue;
+    for (const part of v.split(',')) {
+      const t = part.trim();
+      if (t) out.push(t);
+    }
+  }
+  return out;
+}
+
 const app = express();
 const httpServer = createServer(app);
 
 const isProduction = process.env.NODE_ENV === 'production';
-const clientOrigins = (process.env.CLIENT_URL || '*')
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+
+// CORS + Socket.IO: honor CLIENT_URL and legacy DOODLE_* vars from Kribble-Server/.env & docs.
+const explicitOrigins = parseOriginsList(
+  process.env.CLIENT_URL,
+  process.env.DOODLE_CLIENT_URL,
+  process.env.NETLIFY_DOODLE_CLIENT_URL
+);
+const clientOrigins =
+  explicitOrigins.length > 0 ? explicitOrigins : ['*'];
 const allowAnyOrigin = clientOrigins.includes('*');
 
 const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS || 1);
@@ -276,12 +294,19 @@ const gracefulShutdown = (signal: string) => {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-const PORT = Number(process.env.PORT) || 3001;
+const PORT = Number(process.env.PORT) || 5000;
 
 httpServer.listen(PORT, () => {
   logger.info(`🚀 Server running on port ${PORT}`);
   logger.info(`📊 Health check: http://localhost:${PORT}/health`);
   logger.info(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+  logger.info(
+    {
+      allowAnyOrigin,
+      origins: allowAnyOrigin ? ['*'] : clientOrigins
+    },
+    'CORS / Socket.IO browser origins'
+  );
 
   SocketService.start(io);
   logger.info('🔌 Socket.io service started');

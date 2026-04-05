@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { GiAlarmClock } from 'react-icons/gi';
+import { Link } from 'react-router-dom';
 
 import Text from '@/components/Text';
 import { useGame } from '@/contexts/game';
@@ -152,6 +153,16 @@ const DetailBar = () => {
           >
             {game.options.round.current} / {game.options.round.max}
           </div>
+          <Link
+            to="/profile"
+            style={{
+              fontSize: '0.7rem',
+              color: 'rgba(255, 255, 255, 0.45)',
+              textDecoration: 'none',
+            }}
+          >
+            Profile
+          </Link>
         </div>
       </div>
     </div>

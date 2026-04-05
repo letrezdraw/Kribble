@@ -4,14 +4,12 @@ FROM node:18-alpine AS client-build
 WORKDIR /app/client
 
 # Copy and install client dependencies
-COPY Kribble2.0/Kribble-Client/package*.json ./
-
-
+COPY Kribble-Client/package*.json ./
 
 RUN npm install
 
 # Copy client source and build
-COPY Kribble2.0/Kribble-Client/. ./
+COPY Kribble-Client/. ./
 
 
 
@@ -23,14 +21,12 @@ FROM node:23-alpine AS server-build
 WORKDIR /app
 
 # Copy server dependencies and install
-COPY Kribble2.0/Kribble-Server/package*.json ./
-
-
+COPY Kribble-Server/package*.json ./
 
 RUN npm install
 
 # Copy server source and build
-COPY Kribble2.0/Kribble-Server/. ./
+COPY Kribble-Server/. ./
 
 
 

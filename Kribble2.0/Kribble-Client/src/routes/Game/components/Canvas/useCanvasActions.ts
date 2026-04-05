@@ -1,11 +1,17 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { GameEvents } from '@/constants/Events';
 import { useCanvas } from '@/contexts/canvas';
 import { useRoom } from '@/contexts/room';
-import { socket } from '@/contexts/socket';
+import { emitFireAndForget } from '@/contexts/socket';
 import { CanvasAction, CanvasOperation } from '@/types/canvas';
 import { Coordinate } from '@/types/common';
+import {
+  smoothToward,
+  STROKE_MAX_STEP_PX,
+  STROKE_SMOOTH_ALPHA,
+  subdivideSegment,
+} from '@/utils/strokeSmoothing';
 
 import { convertOptionKeyToCanvasActionKey, OptionKey } from '../Option/utils';
 
@@ -15,6 +21,22 @@ export interface OptionConfig {
   brushSize: number;
 }
 
+const appendNormalizedToBuffer = (
+  buf: Coordinate[],
+  nf: Coordinate,
+  nt: Coordinate
+) => {
+  if (buf.length === 0) {
+    buf.push(nf, nt);
+    return;
+  }
+  const last = buf[buf.length - 1]!;
+  const sameStart =
+    Math.abs(last.x - nf.x) < 1e-9 && Math.abs(last.y - nf.y) < 1e-9;
+  if (sameStart) buf.push(nt);
+  else buf.push(nf, nt);
+};
+
 const useCanvasActions = (optionConfig?: OptionConfig) => {
   const {
     room: { id: roomId },
@@ -23,12 +45,16 @@ const useCanvasActions = (optionConfig?: OptionConfig) => {
 
   const optionConfigRef = useRef(optionConfig);
   const roomIdRef = useRef(roomId);
-  optionConfigRef.current = optionConfig;
   roomIdRef.current = roomId;
+  optionConfigRef.current = optionConfig;
 
-  /** Normalized polyline pending network send (same space as LINE emits). */
   const pendingPolylineRef = useRef<Coordinate[]>([]);
   const rafFlushIdRef = useRef<number | null>(null);
+  const flushNetworkBatchRef = useRef<(isFinal: boolean) => void>(() => {});
+
+  const strokeOpenRef = useRef(false);
+  const smoothPenRef = useRef<Coordinate | null>(null);
+  const lastDrawnBitmapRef = useRef<Coordinate | null>(null);
 
   const flushNetworkBatch = (isFinal: boolean) => {
     const pts = pendingPolylineRef.current;
@@ -53,7 +79,7 @@ const useCanvasActions = (optionConfig?: OptionConfig) => {
       size: oc?.brushSize,
     };
 
-    socket.emit(GameEvents.EMIT_GAME_CANVAS_OPERATION, {
+    emitFireAndForget(GameEvents.EMIT_GAME_CANVAS_OPERATION, {
       canvasOperation,
       roomId: rid,
     });
@@ -61,6 +87,8 @@ const useCanvasActions = (optionConfig?: OptionConfig) => {
     const last = batchPoints[batchPoints.length - 1]!;
     pendingPolylineRef.current = isFinal ? [] : [last];
   };
+
+  flushNetworkBatchRef.current = flushNetworkBatch;
 
   const scheduleNetworkFlush = () => {
     if (rafFlushIdRef.current != null) return;
@@ -85,101 +113,111 @@ const useCanvasActions = (optionConfig?: OptionConfig) => {
     []
   );
 
-  const onPointerDrag = (from: Coordinate, to: Coordinate) => {
+  const resetStrokeGeometry = () => {
+    strokeOpenRef.current = false;
+    smoothPenRef.current = null;
+    lastDrawnBitmapRef.current = null;
+  };
+
+  const onPointerDrag = useCallback((from: Coordinate, to: Coordinate) => {
     if (!drawing) return;
-    const flooredFrom = drawing.normalizeCoordinate(from);
-    const flooredTo = drawing.normalizeCoordinate(to);
-    const performOperation = () => {
-      switch (optionConfig?.type) {
-        case OptionKey.PENCIL:
-          drawing?.loadOperations([
-            {
-              actionType: CanvasAction.LINE,
-              points: [flooredFrom, flooredTo],
-              color: optionConfig.color,
-              size: optionConfig.brushSize,
-            },
-          ]);
-          break;
-        case OptionKey.ERASER:
-          drawing?.loadOperations([
-            {
-              actionType: CanvasAction.ERASE,
-              points: [flooredFrom, flooredTo],
-              size: optionConfig.brushSize,
-            },
-          ]);
-          break;
-        default:
-          return false;
-      }
-      return true;
-    };
+    const oc = optionConfigRef.current;
+    if (!oc) return;
 
-    const isOperationDone = performOperation();
-    if (!isOperationDone) return;
-
-    const buf = pendingPolylineRef.current;
-    if (buf.length === 0) {
-      buf.push(flooredFrom, flooredTo);
-    } else {
-      const last = buf[buf.length - 1]!;
-      const sameStart =
-        Math.abs(last.x - flooredFrom.x) < 1e-9 &&
-        Math.abs(last.y - flooredFrom.y) < 1e-9;
-      if (sameStart) {
-        buf.push(flooredTo);
-      } else {
-        buf.push(flooredFrom, flooredTo);
-      }
+    switch (oc.type) {
+      case OptionKey.PENCIL:
+      case OptionKey.ERASER:
+        break;
+      default:
+        return;
     }
 
-    scheduleNetworkFlush();
-  };
+    if (!strokeOpenRef.current) {
+      strokeOpenRef.current = true;
+      smoothPenRef.current = { ...from };
+      lastDrawnBitmapRef.current = { ...from };
+    }
 
-  const onPointerDragEnd = () => {
-    cancelScheduledFlush();
-    flushNetworkBatch(true);
-  };
+    const smoothTip = smoothPenRef.current!;
+    const nextSmooth = smoothToward(smoothTip, to, STROKE_SMOOTH_ALPHA);
+    smoothPenRef.current = nextSmooth;
 
-  const onPointerClick = (point: Coordinate) => {
-    if (!drawing) return;
-    const flooredPoint: Coordinate = drawing?.normalizeCoordinate(point);
-    const performOperation = () => {
-      switch (optionConfig?.type) {
-        case OptionKey.FILL:
-          drawing?.loadOperations([
-            {
-              actionType: CanvasAction.FILL,
-              points: [flooredPoint],
-              color: optionConfig.color,
-            },
-          ]);
-          break;
-        default:
-          return false;
+    const lastBm = lastDrawnBitmapRef.current!;
+    const chain = subdivideSegment(lastBm, nextSmooth, STROKE_MAX_STEP_PX);
+
+    for (let i = 1; i < chain.length; i++) {
+      const a = chain[i - 1]!;
+      const b = chain[i]!;
+      const nf = drawing.normalizeCoordinate(a);
+      const nt = drawing.normalizeCoordinate(b);
+
+      if (oc.type === OptionKey.PENCIL) {
+        drawing.loadOperations([
+          {
+            actionType: CanvasAction.LINE,
+            points: [nf, nt],
+            color: oc.color,
+            size: oc.brushSize,
+          },
+        ]);
+      } else {
+        drawing.loadOperations([
+          {
+            actionType: CanvasAction.ERASE,
+            points: [nf, nt],
+            size: oc.brushSize,
+          },
+        ]);
       }
-      return true;
-    };
 
-    const isOperationDone = performOperation();
-    if (!isOperationDone) return;
+      appendNormalizedToBuffer(pendingPolylineRef.current, nf, nt);
+    }
 
-    const canvasAction = convertOptionKeyToCanvasActionKey(optionConfig?.type);
-    if (!canvasAction) return;
-    socket.emit(GameEvents.EMIT_GAME_CANVAS_OPERATION, {
-      roomId,
-      canvasOperation: {
-        actionType: canvasAction,
-        points: [flooredPoint],
-        color: optionConfig?.color,
-        size: optionConfig?.brushSize,
-      },
-    });
-  };
+    lastDrawnBitmapRef.current = { ...nextSmooth };
+    scheduleNetworkFlush();
+  }, [drawing]);
 
-  if (!optionConfig) return undefined;
-  return { onPointerDrag, onPointerDragEnd, onPointerClick };
+  const onPointerDragEnd = useCallback(() => {
+    cancelScheduledFlush();
+    flushNetworkBatchRef.current(true);
+    resetStrokeGeometry();
+  }, []);
+
+  const onPointerClick = useCallback(
+    (point: Coordinate) => {
+      if (!drawing) return;
+      const oc = optionConfigRef.current;
+      if (!oc || oc.type !== OptionKey.FILL) return;
+
+      const flooredPoint = drawing.normalizeCoordinate(point);
+
+      drawing.loadOperations([
+        {
+          actionType: CanvasAction.FILL,
+          points: [flooredPoint],
+          color: oc.color,
+        },
+      ]);
+
+      const canvasAction = convertOptionKeyToCanvasActionKey(oc.type);
+      if (!canvasAction) return;
+      emitFireAndForget(GameEvents.EMIT_GAME_CANVAS_OPERATION, {
+        roomId: roomIdRef.current,
+        canvasOperation: {
+          actionType: canvasAction,
+          points: [flooredPoint],
+          color: oc.color,
+          size: oc.brushSize,
+        },
+      });
+    },
+    [drawing]
+  );
+
+  return useMemo(() => {
+    if (!optionConfig) return undefined;
+    return { onPointerDrag, onPointerDragEnd, onPointerClick };
+  }, [optionConfig, onPointerDrag, onPointerDragEnd, onPointerClick]);
 };
 
 export default useCanvasActions;

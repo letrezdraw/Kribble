@@ -15,8 +15,9 @@ services:
     envVars:
       - key: PORT
         value: 5000
-      - key: DOODLE_CLIENT_URL
-        value: http://localhost:5000
+      # Allow browser origins until you set your real deploy URL(s) in the Render dashboard.
+      - key: CLIENT_URL
+        value: "*"
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
