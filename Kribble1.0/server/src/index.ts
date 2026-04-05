@@ -95,9 +95,13 @@ app.get('/api/health', (req: Request, res: Response) => {
 });
 
 
-// Setup Kribble 2.0 Socket.io handlers
-SocketService.start(io);
-setLobbyBroadcastIo(io);
+// TODO: Temporarily disable K2 handlers to use v1 handlers for compatibility
+// SocketService.start(io);
+// setLobbyBroadcastIo(io);
+
+// Enable v1 handlers for Kribble1.0 client compatibility
+import { setupSocketHandlers } from './socket/handlers.js';
+setupSocketHandlers(io);
 
 // Store io instance for use in routes
 app.set('io', io);

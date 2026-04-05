@@ -1102,6 +1102,8 @@ export function setupSocketHandlers(io: Server) {
         room: { 
           id: room.id, 
           name: room.name, 
+          hostId: player.id,
+          phase: room.gameState.phase,
           players: room.players.map(p => ({ 
             id: p.id, 
             username: p.username, 
@@ -1113,10 +1115,11 @@ export function setupSocketHandlers(io: Server) {
           })),
           maxPlayers: room.maxPlayers, 
           settings: room.settings,
-          gameState: room.gameState // Include game state to confirm lobby phase
+          roundNumber: room.gameState.currentRound,
+          totalRounds: room.settings.rounds || 3
         },
-        currentPlayerId: player.id,
-        password: room.password // Send password so creator can auto-join
+        userId: player.id,
+        isHost: true
       });
     });
 
@@ -1208,8 +1211,11 @@ export function setupSocketHandlers(io: Server) {
         room: { 
           id: joinedRoom.id, 
           name: joinedRoom.name, 
+          hostId: joinedRoom.players.find(p => p.isHost)?.id || '',
+          phase: joinedRoom.gameState.phase,
           players: joinedRoom.players.map(p => ({ 
             id: p.id, 
+            userId: p.id,
             username: p.username, 
             avatarId: p.avatarId, 
             score: p.score, 
@@ -1219,20 +1225,18 @@ export function setupSocketHandlers(io: Server) {
           })),
           maxPlayers: joinedRoom.maxPlayers, 
           settings: joinedRoom.settings,
-          gameState: isGameInProgress ? {
-            phase: joinedRoom.gameState.phase,
-            currentRound: joinedRoom.gameState.currentRound,
-            currentTurn: joinedRoom.gameState.currentTurn,
-            totalRounds: joinedRoom.gameState.totalRounds,
-            currentWord: joinedRoom.gameState.currentWord,
-            wordHints: joinedRoom.gameState.wordHints,
-            hintsRemaining: joinedRoom.gameState.hintsRemaining,
-            timeRemaining: joinedRoom.gameState.timeRemaining,
-            drawerId: joinedRoom.players[joinedRoom.gameState.currentDrawerIndex]?.id
-          } : undefined
+          roundNumber: joinedRoom.gameState.currentRound,
+          totalRounds: joinedRoom.settings.rounds || 3,
+          turnTimer: joinedRoom.gameState.timeRemaining,
+          wordSelectionTimer: 15,
+          currentWord: joinedRoom.gameState.currentWord || '',
+          wordHints: joinedRoom.gameState.wordHints || [],
+          hintsRemaining: joinedRoom.gameState.hintsRemaining ?? 3,
+          // wordOptions: joinedRoom.gameState.wordOptions || [],
         },
-        currentPlayerId: player.id,
-        isRejoiningGame: isGameInProgress || isRejoin
+        userId: player.id,
+        isHost: player.isHost,
+        isReconnect: isRejoin
       });
       
       // If game is in progress, send additional game state
@@ -1378,6 +1382,11 @@ export function setupSocketHandlers(io: Server) {
       
       logger.gameState(roomId, 'GAME_STARTED', { round: 1, totalRounds: room.settings.rounds, playerCount: room.players.length });
 
+      // Emit game:started for client GameContext
+      io.to(roomId).emit('game:started', { 
+        room: room 
+      });
+      
       io.to(roomId).emit('game:starting', { round: room.gameState.currentRound, totalRounds: room.settings.rounds });
       
       // Broadcast phase change to all clients

@@ -175,7 +175,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     setReconnecting(socketReconnecting);
   }, [socketReconnecting]);
 
-  // Socket event listeners
+// Socket event listeners
   useEffect(() => {
     if (!socket) return;
 
@@ -184,6 +184,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
     // ==========================================
 
     socket.on('room:created', (data: { room: Room; userId: string; isHost: boolean }) => {
+      if (!data || !data.room) {
+        console.warn('GameContext: Invalid room:created data');
+        return;
+      }
       setRoom(data.room);
       setCurrentUserId(data.userId);
       setIsHost(data.isHost);
@@ -198,6 +202,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
     });
 
     socket.on('room:joined', (data: { room: Room; userId: string; isHost: boolean; isReconnect: boolean }) => {
+      if (!data || !data.room) {
+        console.warn('GameContext: Invalid room:joined data');
+        return;
+      }
       // CRITICAL: Always use server room data as absolute truth
       setRoom(data.room);
       setCurrentUserId(data.userId);
@@ -230,6 +238,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
     });
 
     socket.on('room:player-joined', (data: { player: Player; isReconnect: boolean }) => {
+      if (!data || !data.player) {
+        console.warn('GameContext: Invalid room:player-joined data');
+        return;
+      }
       setRoom(prev => {
         if (!prev) return null;
         const exists = prev.players.find(p => p.userId === data.player.userId);
@@ -251,6 +263,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
     });
 
     socket.on('room:player-left', (data: { userId: string; newHostId?: string; room?: Room }) => {
+      if (!data) {
+        console.warn('GameContext: Invalid room:player-left data');
+        return;
+      }
       // Remove from offline list if present
       setOfflinePlayers(prev => prev.filter(id => id !== data.userId));
       
@@ -319,6 +335,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
     // ==========================================
 
     socket.on('game:started', (data: { room: Room }) => {
+      if (!data || !data.room) {
+        console.warn('GameContext: Invalid game:started data');
+        return;
+      }
       // CRITICAL: Use full room snapshot from server
       setRoom(data.room);
       setGameState(prev => ({
@@ -333,6 +353,31 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setIsDrawer(currentPlayer?.isDrawer || false);
       // Clear offline players on game start
       setOfflinePlayers([]);
+    });
+
+    // Handle server 'game:starting' and 'PHASE_CHANGE' events
+    socket.on('game:starting', (data: { round: number; totalRounds: number }) => {
+      if (!data) return;
+      setGameState(prev => ({
+        ...prev,
+        phase: 'wordSelection',
+        roundNumber: data.round,
+        totalRounds: data.totalRounds,
+      }));
+    });
+
+    socket.on('PHASE_CHANGE', (data: { phase: string; round?: number; drawerId?: string }) => {
+      if (!data) return;
+      console.log('GameContext PHASE_CHANGE:', data);
+      setGameState(prev => ({
+        ...prev,
+        phase: data.phase as GamePhase,
+        roundNumber: data.round || prev.roundNumber,
+      }));
+      if (data.drawerId) {
+        const currentPlayer = room?.players.find(p => p.userId === data.drawerId);
+        setIsDrawer(!!currentPlayer);
+      }
     });
 
     socket.on('game:word-selection', (data: { wordOptions: string[]; selectionTime: number }) => {

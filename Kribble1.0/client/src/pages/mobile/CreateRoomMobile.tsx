@@ -107,12 +107,6 @@ export default function CreateRoomMobile({ onClose }: CreateRoomMobileProps) {
     
     // Use GameContext's createRoom which properly initializes state
     createRoom(roomName, settings);
-    
-    // Wait for room creation confirmation
-    setTimeout(() => {
-      setLoading(false);
-      onClose();
-    }, 500);
   };
 
 
