@@ -11,6 +11,7 @@ import SocketProvider from './contexts/socket';
 import UserProvider from './contexts/user';
 import Game from './routes/Game';
 import Home from './routes/Home';
+import LobbyPage from './routes/LobbyPage';
 import Profile from './routes/Profile';
 
 function App() {
@@ -22,6 +23,10 @@ function App() {
     {
       path: '/profile',
       element: <Profile />,
+    },
+    {
+      path: '/lobby',
+      element: <LobbyPage />,
     },
     {
       path: ':roomId',

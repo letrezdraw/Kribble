@@ -11,6 +11,7 @@ export enum SocketEvents {
 
 export enum RoomSocketEvents {
   ON_ADD_DOODLER_TO_PUBLIC_ROOM = 'add-doodler-to-public-room',
+  ON_ADD_DOODLER_TO_SPECIFIC_PUBLIC_ROOM = 'add-doodler-to-specific-public-room',
   ON_ADD_DOODLER_TO_PRIVATE_ROOM = 'add-doodler-to-private-room',
   ON_CREATE_PRIVATE_ROOM = 'create-private-room',
   ON_GET_ROOM = 'get-room',

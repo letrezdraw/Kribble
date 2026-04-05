@@ -5,6 +5,7 @@ import GameServiceInstance from '@/services/game/GameService';
 import RoomServiceInstance from '@/services/room/RoomService';
 import { GameStatus } from '@/types/game';
 import { GameInterface } from '@/types/socket/game';
+import { scheduleLobbyRoomsBroadcast } from '@/utils/lobbyBroadcast';
 
 import { RoomControllerInterface } from './interface';
 
@@ -46,6 +47,56 @@ class RoomController implements RoomControllerInterface {
       }
 
       respond({ data: { roomId } });
+      scheduleLobbyRoomsBroadcast();
+    };
+
+  /**
+   * Join a specific public room (from lobby list / quick play).
+   */
+  public handleRoomOnAddDoodlerToSpecificPublicRoom: RoomControllerInterface['handleRoomOnAddDoodlerToSpecificPublicRoom'] =
+    (socket) => async (payload, respond) => {
+      const { roomId } = payload;
+      const doodler = await DoodlerServiceInstance.findDooder(socket.id);
+      const { id: joinedRoomId, gameId } =
+        await RoomServiceInstance.assignDoodlerToSpecificPublicRoom(
+          roomId,
+          doodler.id
+        );
+
+      socket.join(joinedRoomId);
+      socket.to(joinedRoomId).emit(RoomSocketEvents.EMIT_DOODLER_JOIN, {
+        doodler
+      });
+
+      let game: GameInterface | undefined = undefined;
+      if (!gameId) {
+        const gameInterface = await GameServiceInstance.createGame(joinedRoomId);
+        await RoomServiceInstance.assignGameToRoom(
+          joinedRoomId,
+          gameInterface.id
+        );
+        game = gameInterface;
+      } else {
+        const gameInterface = await GameServiceInstance.findGame(gameId);
+        game = gameInterface;
+      }
+
+      const isValidGameRoom =
+        await RoomServiceInstance.isValidGameRoom(joinedRoomId);
+      if (!gameId || !isValidGameRoom) {
+        await RoomServiceInstance.changeDrawerTurn(joinedRoomId, true);
+        await GameServiceInstance.updateStatus(game!.id, GameStatus.LOBBY, true);
+      } else if (game!.status === GameStatus.LOBBY && isValidGameRoom) {
+        await RoomServiceInstance.changeDrawerTurn(joinedRoomId);
+        await GameServiceInstance.updateStatus(
+          game!.id,
+          GameStatus.CHOOSE_WORD,
+          true
+        );
+      }
+
+      respond({ data: { roomId: joinedRoomId } });
+      scheduleLobbyRoomsBroadcast();
     };
 
   /**
@@ -64,6 +115,7 @@ class RoomController implements RoomControllerInterface {
       socket.join(roomId);
       socket.to(roomId).emit(RoomSocketEvents.EMIT_DOODLER_JOIN, { doodler });
       respond({ data: { room } });
+      scheduleLobbyRoomsBroadcast();
     };
 
   /**
@@ -83,6 +135,7 @@ class RoomController implements RoomControllerInterface {
         true
       );
       respond({ data: { roomId } });
+      scheduleLobbyRoomsBroadcast();
     };
 
   /**

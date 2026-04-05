@@ -21,6 +21,7 @@ import pino from 'pino';
 import { Server } from 'socket.io';
 
 import SocketService from '@/services/socket/SocketService';
+import { setLobbyBroadcastIo } from '@/utils/lobbyBroadcast';
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -309,6 +310,7 @@ httpServer.listen(PORT, () => {
   );
 
   SocketService.start(io);
+  setLobbyBroadcastIo(io);
   logger.info('🔌 Socket.io service started');
 });
 

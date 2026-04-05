@@ -90,6 +90,25 @@ const Home = () => {
           }}
         >
           <Link
+            to="/lobby"
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              fontSize: '0.8rem',
+              color: 'rgba(255,255,255,0.65)',
+              textDecoration: 'none',
+              padding: '0.35rem 0.65rem',
+              borderRadius: '8px',
+              border: '1px solid rgba(255,255,255,0.12)',
+            }}
+          >
+            Lobby
+          </Link>
+          <Link
             to="/profile"
             style={{
               position: 'absolute',

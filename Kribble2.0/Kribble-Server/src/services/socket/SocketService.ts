@@ -5,6 +5,7 @@ import {
   SocketEvents
 } from '@/constants/events/socket';
 import Controller, { ControllerInterface } from '@/controllers';
+import RoomServiceInstance from '@/services/room/RoomService';
 import { ClientToServerEvents, IoType, SocketType } from '@/types/socket';
 import { DoodleServerError } from '@/utils/error';
 
@@ -27,6 +28,19 @@ class SocketService implements SocketServiceInterface {
       this._registerDoodlerSocketEvents(socket);
       this._registerRoomSocketEvents(socket);
       this._registerGameSocketEvents(socket);
+
+      /** Kribble 1.0–compatible lobby browser (no ACK; not in typed ClientToServerEvents). */
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (socket as any).on('lobby:get-rooms', async () => {
+        try {
+          const rooms = await RoomServiceInstance.listLobbyRoomSummaries();
+          const onlineCount = io.engine.clientsCount;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (socket as any).emit('lobby:rooms', { rooms, onlineCount });
+        } catch (e) {
+          console.error(e);
+        }
+      });
     });
   };
 
@@ -102,6 +116,11 @@ class SocketService implements SocketServiceInterface {
       socket,
       RoomSocketEvents.ON_ADD_DOODLER_TO_PUBLIC_ROOM,
       this._controller.handleRoomOnAddDoodlerToPublicRoom(socket)
+    );
+    this._registerCustomSocketEvent(
+      socket,
+      RoomSocketEvents.ON_ADD_DOODLER_TO_SPECIFIC_PUBLIC_ROOM,
+      this._controller.handleRoomOnAddDoodlerToSpecificPublicRoom(socket)
     );
     this._registerCustomSocketEvent(
       socket,

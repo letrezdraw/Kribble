@@ -1,10 +1,12 @@
 import { MINIMUM_VALID_SIZE } from '@/constants/game';
 import { RoomModel } from '@/models/RoomModel';
-import { RoomInfoMapType } from '@/types/game';
+import { GameStatus, RoomInfoMapType } from '@/types/game';
+import { LobbyListedRoom } from '@/types/lobby';
 import { RoomInterface } from '@/types/socket/room';
 import { DoodleServerError } from '@/utils/error';
 
 import DoodlerServiceInstance from '../doodler/DoodlerService';
+import GameServiceInstance from '../game/GameService';
 import { RoomServiceInterface } from './interface';
 
 class RoomService implements RoomServiceInterface {
@@ -88,6 +90,22 @@ class RoomService implements RoomServiceInterface {
   }
 
   /**
+   * Add a doodler to an existing public room by id (lobby join).
+   */
+  public async assignDoodlerToSpecificPublicRoom(
+    roomId: string,
+    doodlerId: string
+  ) {
+    const roomModel = await this._findRoomModel(roomId);
+    if (roomModel.isPrivate) {
+      throw new DoodleServerError('Invalid room!');
+    }
+    const isDoodlerAdded = roomModel.addDoodler(doodlerId);
+    if (!isDoodlerAdded) throw new DoodleServerError('Room is full!');
+    return roomModel.json;
+  }
+
+  /**
    * Assigms a doodler to a public room
    * @param doodler
    * @returns
@@ -156,6 +174,45 @@ class RoomService implements RoomServiceInterface {
         async (doodlerId) => await DoodlerServiceInstance.clearScore(doodlerId)
       )
     );
+  }
+
+  /** Snapshot for Kribble 1.0–style lobby browser */
+  public async listLobbyRoomSummaries(): Promise<LobbyListedRoom[]> {
+    const out: LobbyListedRoom[] = [];
+    for (const roomModel of this._rooms.values()) {
+      const r = roomModel.json;
+      let phase = 'waiting';
+      if (r.gameId) {
+        try {
+          const game = await GameServiceInstance.findGame(r.gameId);
+          phase = game.status === GameStatus.LOBBY ? 'waiting' : 'playing';
+        } catch {
+          phase = 'waiting';
+        }
+      }
+      let hostName: string | undefined;
+      if (r.ownerId) {
+        try {
+          const d = await DoodlerServiceInstance.findDooder(r.ownerId);
+          hostName = d.name;
+        } catch {
+          /* owner disconnected */
+        }
+      }
+      out.push({
+        id: r.id,
+        name: r.isPrivate
+          ? `Private · ${r.id.slice(0, 6)}`
+          : `Public · ${r.id.slice(0, 6)}`,
+        hostName,
+        playerCount: r.doodlers.length,
+        maxPlayers: r.capacity,
+        isPrivate: r.isPrivate,
+        gameMode: 'classic',
+        phase
+      });
+    }
+    return out;
   }
 
   // PRIVATE METHODS

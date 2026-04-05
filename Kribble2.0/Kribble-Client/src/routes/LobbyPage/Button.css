@@ -1,0 +1,109 @@
+/* Kribble 1.0 Button — class names prefixed to avoid collisions with V2 .btn */
+.kribble-v1-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  font-family: var(--font-body, system-ui);
+  font-weight: 600;
+  border: none;
+  border-radius: var(--radius-xl);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  position: relative;
+  overflow: hidden;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.kribble-v1-btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.3);
+}
+
+.kribble-v1-btn-sm {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  height: 36px;
+}
+
+.kribble-v1-btn-md {
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--text-base);
+  height: 44px;
+}
+
+.kribble-v1-btn-lg {
+  padding: var(--space-4) var(--space-8);
+  font-size: var(--text-lg);
+  height: 52px;
+}
+
+.kribble-v1-btn-primary {
+  background: var(--gradient-primary);
+  color: white;
+  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.4);
+}
+
+.kribble-v1-btn-primary:hover:not(:disabled) {
+  box-shadow: 0 6px 25px rgba(139, 92, 246, 0.5);
+  transform: translateY(-2px);
+}
+
+.kribble-v1-btn-secondary {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.kribble-v1-btn-secondary:hover:not(:disabled) {
+  background: var(--bg-card);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-2px);
+}
+
+.kribble-v1-btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+}
+
+.kribble-v1-btn-ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.kribble-v1-btn-danger {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--error);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.kribble-v1-btn-disabled,
+.kribble-v1-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.kribble-v1-btn-loading {
+  pointer-events: none;
+}
+
+.kribble-v1-btn-full-width {
+  width: 100%;
+}
+
+.kribble-v1-btn-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
+
+.kribble-v1-btn-spinner svg {
+  width: 100%;
+  height: 100%;
+  color: currentColor;
+}

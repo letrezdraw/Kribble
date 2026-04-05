@@ -1,3 +1,4 @@
+import { LobbyListedRoom } from '@/types/lobby';
 import { DoodlerInterface } from '@/types/socket/doodler';
 import { GameInterface } from '@/types/socket/game';
 import { RoomInterface } from '@/types/socket/room';
@@ -16,6 +17,10 @@ export interface RoomServiceInterface {
   assignDoodlerToPublicRoom: (
     doodlerId: DoodlerInterface['id']
   ) => Promise<RoomInterface>;
+  assignDoodlerToSpecificPublicRoom: (
+    roomId: string,
+    doodlerId: DoodlerInterface['id']
+  ) => Promise<RoomInterface>;
   assignDoodlerToPrivateRoom: (
     roomId: string,
     doodlerId: DoodlerInterface['id']
@@ -32,4 +37,6 @@ export interface RoomServiceInterface {
   ) => Promise<RoomInterface>;
   changeDrawerTurn: (roomId: string) => Promise<RoomInterface>;
   resetScoreboard: (roomId: string) => Promise<void>;
+
+  listLobbyRoomSummaries: () => Promise<LobbyListedRoom[]>;
 }

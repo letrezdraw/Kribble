@@ -9,6 +9,10 @@ export interface RoomClientToServerEventsArgumentMap {
     undefined,
     { roomId: RoomInterface['id'] }
   >;
+  [RoomEvents.EMIT_ADD_DOODLER_TO_SPECIFIC_PUBLIC_ROOM]: ClientToServerEventsArgument<
+    { roomId: RoomInterface['id'] },
+    { roomId: RoomInterface['id'] }
+  >;
   [RoomEvents.EMIT_ADD_DOODLER_TO_PRIVATE_ROOM]: ClientToServerEventsArgument<
     { roomId: string },
     { room: RoomInterface }

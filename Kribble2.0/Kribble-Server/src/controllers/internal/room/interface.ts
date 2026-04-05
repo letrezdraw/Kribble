@@ -9,6 +9,13 @@ export interface RoomControllerInterface {
       ClientToServerEvents[RoomSocketEvents.ON_ADD_DOODLER_TO_PUBLIC_ROOM]
     >
   ) => void;
+  handleRoomOnAddDoodlerToSpecificPublicRoom: (
+    socket: SocketType
+  ) => (
+    ...args: Parameters<
+      ClientToServerEvents[RoomSocketEvents.ON_ADD_DOODLER_TO_SPECIFIC_PUBLIC_ROOM]
+    >
+  ) => void;
   handleRoomOnAddDoodlerToPrivateRoom: (
     socket: SocketType
   ) => (
