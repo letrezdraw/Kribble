@@ -5,7 +5,7 @@ import {
   Pencil, Eraser, Square, Circle, Type, Undo2, Redo2, 
   Trash2, Send, Users, Clock, MessageCircle, Crown, Palette,
   Settings, LogOut, ChevronRight, Trophy, Sparkles, PaintBucket,
-  Globe, Timer, Hash, Eye, Gamepad2
+  Globe, Timer, Hash, Eye, Gamepad2, Copy, AlertTriangle, WifiOff
 } from 'lucide-react';
 import { useGame, Player } from '../contexts/GameContext';
 import { useSocket } from '../contexts/SocketContext';
@@ -46,7 +46,7 @@ export default function GameRoom() {
   const location = useLocation();
   const { user } = useAuth();
   const { socket } = useSocket();
-  const { room, gameState, isDrawer, isHost, leaveRoom, submitGuess, startGame, rankings, playAgain, selectWord, joinRoom, requestHint, roomError } = useGame();
+  const { room, gameState, isDrawer, isHost, leaveRoom, submitGuess, startGame, rankings, playAgain, selectWord, joinRoom, requestHint, roomError, reconnecting, offlinePlayers } = useGame();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [guess, setGuess] = useState('');
@@ -55,6 +55,7 @@ export default function GameRoom() {
   const [brushColor, setBrushColor] = useState('#000000');
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showSettings, setShowSettings] = useState(true);
+  const [copiedCode, setCopiedCode] = useState(false);
 
   const [gameSettings, setGameSettings] = useState({
     maxPlayers: room?.maxPlayers || 8,
@@ -198,6 +199,26 @@ export default function GameRoom() {
     : gameState.turnTimer;
 
   const sortedPlayers = [...(room?.players || [])].sort((a: Player, b: Player) => b.score - a.score);
+  const connectedPlayers = room?.players.filter((player) => player.connected).length || 0;
+  const canStartGame = connectedPlayers >= 2;
+  const roomStatusMessage = roomError
+    ? roomError
+    : reconnecting
+      ? 'Reconnecting to the game server...'
+      : offlinePlayers.length > 0
+        ? `${offlinePlayers.length} player${offlinePlayers.length === 1 ? '' : 's'} disconnected. Their slot is being held for reconnect.`
+        : null;
+
+  const handleCopyRoomCode = useCallback(async () => {
+    if (!room?.id || !navigator.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(room.id);
+      setCopiedCode(true);
+      window.setTimeout(() => setCopiedCode(false), 1800);
+    } catch {
+      setCopiedCode(false);
+    }
+  }, [room?.id]);
 
   if (!room) {
     return (
@@ -228,23 +249,43 @@ export default function GameRoom() {
     return (
       <div className="game-room-desktop">
         <div className="lobby-waiting-overlay">
-          <div className="waiting-animation">
+          <div className="waiting-animation waiting-room-layout">
             <div className="waiting-left">
               <div className="spinner-large"></div>
               <h2>Waiting for players...</h2>
-              <p>Share the room code with friends to join before the host starts the game.</p>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  leaveRoom();
-                  navigate('/lobby');
-                }}
-                className="leave-room-btn"
-              >
-                <LogOut size={16} />
-                Leave Room
-              </Button>
+              <p>Share the room code, fine-tune the setup, and start when everyone is in.</p>
+              <div className="waiting-room-stats">
+                <div className="waiting-stat-card">
+                  <span className="waiting-stat-label">Connected</span>
+                  <strong>{connectedPlayers}</strong>
+                </div>
+                <div className="waiting-stat-card">
+                  <span className="waiting-stat-label">Rounds</span>
+                  <strong>{gameSettings.rounds}</strong>
+                </div>
+                <div className="waiting-stat-card">
+                  <span className="waiting-stat-label">Draw Time</span>
+                  <strong>{gameSettings.roundTime}s</strong>
+                </div>
+              </div>
+              <div className="waiting-actions">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    leaveRoom();
+                    navigate('/lobby');
+                  }}
+                  className="leave-room-btn"
+                >
+                  <LogOut size={16} />
+                  Leave Room
+                </Button>
+                <Button variant="secondary" size="sm" onClick={handleCopyRoomCode}>
+                  <Copy size={16} />
+                  {copiedCode ? 'Copied' : 'Copy Code'}
+                </Button>
+              </div>
             </div>
             <div className="waiting-right">
               <div className="room-code-display">
@@ -262,14 +303,78 @@ export default function GameRoom() {
                   ))}
                 </div>
               </div>
-              {isHost && (
-                <div className="lobby-actions">
-                  <Button variant="primary" fullWidth onClick={startGame}>
-                    <Sparkles size={16} />
-                    Start Game
-                  </Button>
+              <div className={`game-settings-panel ${!isHost ? 'read-only' : ''}`}>
+                <h3><Settings size={18} /> Room Setup {isHost && <span className="host-badge-inline">(Host)</span>}</h3>
+                <div className="settings-grid">
+                  <div className="setting-item">
+                    <label><Users size={14} /> Players</label>
+                    {isHost ? (
+                      <input
+                        type="number"
+                        min="2"
+                        max="16"
+                        value={gameSettings.maxPlayers}
+                        onChange={(e) => setGameSettings({ ...gameSettings, maxPlayers: parseInt(e.target.value) || 8 })}
+                      />
+                    ) : (
+                      <span className="setting-value">{gameSettings.maxPlayers}</span>
+                    )}
+                  </div>
+                  <div className="setting-item">
+                    <label><Timer size={14} /> Draw Time</label>
+                    {isHost ? (
+                      <input
+                        type="number"
+                        min="30"
+                        max="300"
+                        value={gameSettings.roundTime}
+                        onChange={(e) => setGameSettings({ ...gameSettings, roundTime: parseInt(e.target.value) || 80 })}
+                      />
+                    ) : (
+                      <span className="setting-value">{gameSettings.roundTime}s</span>
+                    )}
+                  </div>
+                  <div className="setting-item">
+                    <label><Hash size={14} /> Rounds</label>
+                    {isHost ? (
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={gameSettings.rounds}
+                        onChange={(e) => setGameSettings({ ...gameSettings, rounds: parseInt(e.target.value) || 3 })}
+                      />
+                    ) : (
+                      <span className="setting-value">{gameSettings.rounds}</span>
+                    )}
+                  </div>
+                  <div className="setting-item">
+                    <label><Eye size={14} /> Hints</label>
+                    {isHost ? (
+                      <input
+                        type="number"
+                        min="0"
+                        max="5"
+                        value={gameSettings.hints}
+                        onChange={(e) => setGameSettings({ ...gameSettings, hints: parseInt(e.target.value) || 2 })}
+                      />
+                    ) : (
+                      <span className="setting-value">{gameSettings.hints}</span>
+                    )}
+                  </div>
                 </div>
-              )}
+                {isHost && (
+                  <div className="settings-actions">
+                    <Button variant="secondary" size="sm" onClick={updateSettings}>
+                      Apply Settings
+                    </Button>
+                    <Button variant="primary" size="sm" onClick={startGame} disabled={!canStartGame}>
+                      <Sparkles size={16} />
+                      {canStartGame ? 'Start Game' : 'Need 2 Players'}
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -319,6 +424,12 @@ export default function GameRoom() {
           </Button>
         </div>
       </header>
+      {roomStatusMessage && (
+        <div className={`room-status-banner ${roomError ? 'error' : reconnecting ? 'warning' : 'info'}`}>
+          {roomError ? <AlertTriangle size={16} /> : <WifiOff size={16} />}
+          <span>{roomStatusMessage}</span>
+        </div>
+      )}
 
       {/* Main Game Area */}
       <div className="game-layout">
@@ -385,6 +496,16 @@ export default function GameRoom() {
                 <Sparkles size={14} />
                 {gameState.hintsRemaining} hints remaining
               </div>
+              {!isDrawer && gameState.hintsRemaining > 0 && (
+                <button
+                  className="hint-request-btn"
+                  onClick={requestHint}
+                  title="Reveal a hint"
+                >
+                  <Eye size={16} />
+                  Reveal Hint
+                </button>
+              )}
               <button 
                 className="leave-room-btn-bar"
                 onClick={() => {
@@ -439,7 +560,7 @@ export default function GameRoom() {
                   points: 0,
                 }]).map((award, i) => (
                   <div key={`${award.userId}-${i}`} className="round-score-item">
-                    <span className="medal">{i === 0 ? 'ðŸ¥‡' : i === 1 ? 'ðŸ¥ˆ' : i === 2 ? 'ðŸ¥‰' : 'â€¢'}</span>
+                    <span className="medal">{i === 0 ? '#1' : i === 1 ? '#2' : i === 2 ? '#3' : '•'}</span>
                     <span>{award.username}</span>
                     <span className="points">+{award.points} pts</span>
                   </div>

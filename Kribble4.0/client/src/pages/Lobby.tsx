@@ -152,6 +152,9 @@ export default function Lobby() {
   }, [searchQuery, filter, rooms]);
 
   const handleJoinRoom = (room: Room) => {
+    if (room.phase !== 'waiting') {
+      return;
+    }
     if (room.isPrivate) {
       setSelectedRoom(room);
       setShowPasswordModal(true);
@@ -189,6 +192,9 @@ export default function Lobby() {
   };
 
   const rank = getRankByLevel(user?.level || 1);
+  const waitingRooms = rooms.filter((room) => room.phase === 'waiting');
+  const liveRooms = rooms.filter((room) => room.phase !== 'waiting');
+  const openSeats = waitingRooms.reduce((sum, room) => sum + Math.max(room.maxPlayers - room.playerCount, 0), 0);
 
   const getThemeIcon = () => {
     switch (theme) {
@@ -424,6 +430,24 @@ export default function Lobby() {
             </motion.button>
           </motion.div>
 
+          <div className="lobby-overview">
+            <div className="overview-card glass">
+              <span className="overview-label">Waiting Rooms</span>
+              <strong>{waitingRooms.length}</strong>
+              <small>Ready for players</small>
+            </div>
+            <div className="overview-card glass">
+              <span className="overview-label">Live Games</span>
+              <strong>{liveRooms.length}</strong>
+              <small>Already in progress</small>
+            </div>
+            <div className="overview-card glass">
+              <span className="overview-label">Open Seats</span>
+              <strong>{openSeats}</strong>
+              <small>Across public lobbies</small>
+            </div>
+          </div>
+
           {/* Room List */}
           <div className="rooms-list">
             {loading ? (
@@ -442,7 +466,7 @@ export default function Lobby() {
                 animate={{ opacity: 1, scale: 1 }}
               >
                 <Sparkles size={48} className="empty-icon" />
-                <p>No rooms found</p>
+                <p>{searchQuery ? `No rooms match "${searchQuery}"` : 'No rooms found'}</p>
                 <Button variant="secondary" onClick={() => setShowCreateModal(true)}>
                   Create Room
                 </Button>
@@ -463,6 +487,9 @@ export default function Lobby() {
                     <div className="room-header">
                       <h3>{room.name}</h3>
                       <div className="room-badges">
+                        <span className={`room-phase-badge ${room.phase === 'waiting' ? 'waiting' : 'live'}`}>
+                          {room.phase === 'waiting' ? 'Waiting' : 'Live'}
+                        </span>
                         {room.isPrivate ? (
                           <span className="room-badge private glass">
                             <Lock size={14} />
@@ -485,6 +512,7 @@ export default function Lobby() {
                         <span>{room.gameMode}</span>
                       </div>
                     </div>
+                    <div className="room-host-name">Host: {room.hostName || 'Unknown'}</div>
                     
                     <div className="room-progress glass">
                       <motion.div 
@@ -504,13 +532,13 @@ export default function Lobby() {
                       variant="primary" 
                       size="sm" 
                       className="join-btn"
-                      disabled={room.playerCount >= room.maxPlayers}
+                      disabled={room.playerCount >= room.maxPlayers || room.phase !== 'waiting'}
                       onClick={(e) => {
                         e.stopPropagation();
                         handleJoinRoom(room);
                       }}
                     >
-                      {room.playerCount >= room.maxPlayers ? 'Full' : (
+                      {room.playerCount >= room.maxPlayers ? 'Full' : room.phase !== 'waiting' ? 'In Game' : (
                         <><Play size={16} /> Join</>
                       )}
                     </Button>
