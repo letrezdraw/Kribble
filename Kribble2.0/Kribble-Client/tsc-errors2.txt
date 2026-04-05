@@ -1,0 +1,9 @@
+src/routes/LobbyPage/index.tsx(543,16): error TS2786: 'AnimatePresence' cannot be used as a JSX component.
+  Its return type 'Element | undefined' is not a valid JSX element.
+src/routes/LobbyPage/index.tsx(629,8): error TS2786: 'AnimatePresence' cannot be used as a JSX component.
+  Its return type 'Element | undefined' is not a valid JSX element.
+    Type 'undefined' is not assignable to type 'Element | null'.
+src/routes/LobbyPage/index.tsx(692,8): error TS2786: 'AnimatePresence' cannot be used as a JSX component.
+  Its return type 'Element | undefined' is not a valid JSX element.
+src/routes/LobbyPage/index.tsx(699,8): error TS2786: 'AnimatePresence' cannot be used as a JSX component.
+  Its return type 'Element | undefined' is not a valid JSX element.

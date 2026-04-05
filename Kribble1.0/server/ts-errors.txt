@@ -1,0 +1,16 @@
+src/k2/models/GameModel.ts(145,36): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(timeout: string | number | Timeout | undefined): void', gave the following error.
+    Argument of type 'Timer' is not assignable to parameter of type 'string | number | Timeout | undefined'.
+      Type 'Timer' is missing the following properties from type 'Timeout': close, _onTimeout, [Symbol.dispose]
+  Overload 2 of 2, '(id: number | undefined): void', gave the following error.
+    Argument of type 'Timer' is not assignable to parameter of type 'number'.
+src/k2/services/game/GameService.ts(9,8): error TS2307: Cannot find module '@/types/game' or its corresponding type declarations.
+src/k2/services/game/GameService.ts(14,8): error TS2307: Cannot find module '@/types/socket/game' or its corresponding type declarations.
+src/k2/services/game/interface.ts(6,8): error TS2307: Cannot find module '@/types/socket/game' or its corresponding type declarations.
+src/k2/services/socket/interface.ts(1,46): error TS2307: Cannot find module '../../types/socket.js' or its corresponding type declarations.
+src/k2/services/socket/SocketService.ts(6,8): error TS2307: Cannot find module '@/constants/events/socket' or its corresponding type declarations.
+src/k2/services/socket/SocketService.ts(7,49): error TS2307: Cannot find module '../../controllers.js' or its corresponding type declarations.
+src/k2/services/socket/SocketService.ts(9,58): error TS2307: Cannot find module '../../types/socket.js' or its corresponding type declarations.
+src/k2/services/socket/SocketService.ts(23,26): error TS7006: Parameter 'socket' implicitly has an 'any' type.
+src/k2/utils/game.ts(5,8): error TS2307: Cannot find module '@/types/socket/game' or its corresponding type declarations.
+src/k2/utils/words.ts(1,19): error TS2307: Cannot find module '../constants/words.json.js' or its corresponding type declarations.

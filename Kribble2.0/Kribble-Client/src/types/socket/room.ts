@@ -3,6 +3,7 @@ import { RoomEvents } from '@/constants/Events';
 import { DoodlerInterface } from '../models/doodler';
 import { RoomInterface } from '../models/room';
 import { ClientToServerEventsArgument } from './helper';
+import { LobbyListedRoom } from '../lobby';
 
 export interface RoomClientToServerEventsArgumentMap {
   [RoomEvents.EMIT_ADD_DOODLER_TO_PUBLIC_ROOM]: ClientToServerEventsArgument<
@@ -25,6 +26,10 @@ export interface RoomClientToServerEventsArgumentMap {
     string,
     { room: RoomInterface; doodlers: DoodlerInterface[] }
   >;
+  [RoomEvents.EMIT_GET_LOBBY_ROOMS]: ClientToServerEventsArgument<
+    undefined,
+    { rooms: LobbyListedRoom[]; onlineCount?: number }
+  >;
 }
 
 export interface RoomServerToClientEvents {
@@ -32,4 +37,5 @@ export interface RoomServerToClientEvents {
   [RoomEvents.ON_DOODLER_LEAVE]: (args: {
     doodlerId: DoodlerInterface['id'];
   }) => void;
+  [RoomEvents.ON_LOBBY_ROOMS_UPDATED]: (args: { rooms: LobbyListedRoom[]; onlineCount?: number }) => void;
 }

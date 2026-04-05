@@ -1,0 +1,47 @@
+{
+  "connection": {
+    "lost": "Lost connection to the server. Check that the game server is running and try again."
+  },
+  "chooseWord": {
+    "title": {
+      "drawer": "Choose a word",
+      "hunchers": " is choosing a word"
+    }
+  },
+  "detailBar": {},
+  "doodlers": {
+    "sectionTitle": "doodlers",
+    "userMarker": "(You)"
+  },
+  "hunchList": {
+    "input": {
+      "caption": "Press enter to hunch",
+      "placeholder": "Type your hunch . . ."
+    },
+    "sectionTitle": "hunch time !"
+  },
+  "lobby": {
+    "properties": {
+      "capacity": "Maximum players",
+      "drawTime": "Time to Draw",
+      "hints": "Hints",
+      "language": "Language",
+      "rounds": "Rounds"
+    },
+    "sectionTitle": "Lobby",
+    "waiting": "Waiting for players to join"
+  },
+  "result": {
+    "title": "RESULT!"
+  },
+  "roundStart": {
+    "title": "Round "
+  },
+  "turnEnd": {
+    "title": "The word was "
+  },
+  "privateLobby": {
+    "notEnoughMembers": "You can start a game with atleast 2 players.",
+    "share": "Share the invite link with friends!"
+  }
+}

@@ -19,7 +19,11 @@ import { authRoutes, cleanupExpiredGuests } from './routes/auth.js';
 import { roomRoutes } from './routes/rooms.js';
 import { userRoutes } from './routes/users.js';
 import { wordRoutes } from './routes/words.js';
-import { setupSocketHandlers } from './socket/handlers-v2.js';
+// Removed old Kribble 1.0 socket handlers:
+// import { setupSocketHandlers } from './socket/handlers-v2.js';
+
+import SocketService from './k2/services/socket/SocketService.js';
+import { setLobbyBroadcastIo } from './k2/utils/lobbyBroadcast.js';
 
 import { initDatabase } from './db/index.js';
 import { startCleanupScheduler } from './data/rooms.js';
@@ -91,8 +95,9 @@ app.get('/api/health', (req: Request, res: Response) => {
 });
 
 
-// Setup Socket.io handlers
-setupSocketHandlers(io);
+// Setup Kribble 2.0 Socket.io handlers
+SocketService.start(io);
+setLobbyBroadcastIo(io);
 
 // Store io instance for use in routes
 app.set('io', io);

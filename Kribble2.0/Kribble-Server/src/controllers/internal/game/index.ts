@@ -50,7 +50,9 @@ class GameController implements GameControllerInterface {
       socket
         .to(roomId)
         .emit(GameSocketEvents.EMIT_GAME_CANVAS_OPERATION, { canvasOperation });
-      respond({ data: { game } });
+      if (respond) {
+        respond({ data: { game } });
+      }
     };
 
   public handleGameOnChooseWord: GameControllerInterface['handleGameOnChooseWord'] =

@@ -1,52 +1,61 @@
 import { Router, Request, Response } from 'express';
-import { rooms, createRoom, getRoomList, getRoom } from '../data/rooms.js';
+import RoomServiceInstance from '../k2/services/room/RoomService.js';
 
 const router = Router();
 
 // Get all rooms
-router.get('/', (req: Request, res: Response) => {
-  const roomList = getRoomList();
+router.get('/', async (req: Request, res: Response) => {
+  const roomList = await RoomServiceInstance.listLobbyRoomSummaries();
   res.json({ rooms: roomList });
 });
 
 // Create room
-router.post('/', (req: Request, res: Response) => {
+router.post('/', async (req: Request, res: Response) => {
   const { name, settings } = req.body;
   
-  const room = createRoom(name, settings);
+  const room = await RoomServiceInstance.createRoom(
+    undefined,
+    name,
+    settings?.maxPlayers,
+    settings?.isPrivate === true
+  );
   
   res.status(201).json({ room });
 });
 
 
 // Get room
-router.get('/:id', (req: Request, res: Response) => {
-  const room = rooms.get(req.params.id);
-  
-  if (!room) {
-    return res.status(404).json({ message: 'Room not found' });
+router.get('/:id', async (req: Request, res: Response) => {
+  try {
+    const room = await RoomServiceInstance.findRoom(req.params.id);
+    res.json({ room });
+  } catch (e) {
+    res.status(404).json({ message: 'Room not found' });
   }
-  
-  res.json({ room });
 });
 
 // Join room
-router.post('/:id/join', (req: Request, res: Response) => {
-  const room = rooms.get(req.params.id);
-  
-  if (!room) {
-    return res.status(404).json({ message: 'Room not found' });
+router.post('/:id/join', async (req: Request, res: Response) => {
+  try {
+    const { doodlerId } = req.body;
+    const room = await RoomServiceInstance.findRoom(req.params.id);
+    
+    if (room.doodlers.length >= room.capacity) {
+      return res.status(400).json({ message: 'Room is full' });
+    }
+    
+    // In K2, joining via specific ID for a public room:
+    if (!room.isPrivate) {
+      await RoomServiceInstance.assignDoodlerToSpecificPublicRoom(room.id, doodlerId);
+    } else {
+      // For private rooms, we'd need a password check here if K2 model added it
+      await RoomServiceInstance.assignDoodlerToPrivateRoom(room.id, doodlerId);
+    }
+    
+    res.json({ room: await RoomServiceInstance.findRoom(req.params.id) });
+  } catch (e) {
+    res.status(404).json({ message: 'Room not found or join failed' });
   }
-  
-  if (room.players.length >= room.maxPlayers) {
-    return res.status(400).json({ message: 'Room is full' });
-  }
-  
-  if (room.isPrivate && room.password !== req.body.password) {
-    return res.status(403).json({ message: 'Invalid password' });
-  }
-  
-  res.json({ room });
 });
 
 // Leave room
@@ -55,14 +64,13 @@ router.post('/:id/leave', (req: Request, res: Response) => {
 });
 
 // Start game
-router.post('/:id/start', (req: Request, res: Response) => {
-  const room = rooms.get(req.params.id);
-  
-  if (!room) {
-    return res.status(404).json({ message: 'Room not found' });
+router.post('/:id/start', async (req: Request, res: Response) => {
+  try {
+    const room = await RoomServiceInstance.findRoom(req.params.id);
+    res.json({ success: true, roomId: room.id });
+  } catch (e) {
+    res.status(404).json({ message: 'Room not found' });
   }
-  
-  res.json({ success: true });
 });
 
 export { router as roomRoutes };

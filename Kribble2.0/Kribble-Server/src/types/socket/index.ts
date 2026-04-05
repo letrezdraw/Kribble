@@ -22,12 +22,19 @@ export type ServerToClientEvents = DoodlerServerToClientEvents &
   RoomServerToClientEvents;
 
 export type ClientToServerEvents = {
-  [Key in keyof ClientToServerEventsArgumentMap]: (
-    payload: ClientToServerEventsArgumentMap[Key]['payload'],
-    respond: (
-      response: ClientToServerEventsArgumentMap[Key]['response']
-    ) => void
-  ) => void;
+  [Key in keyof ClientToServerEventsArgumentMap]: Key extends 'EMIT_GAME_CANVAS_OPERATION'
+    ? (
+        payload: ClientToServerEventsArgumentMap[Key]['payload'],
+        respond?: (
+          response: ClientToServerEventsArgumentMap[Key]['response']
+        ) => void
+      ) => void
+    : (
+        payload: ClientToServerEventsArgumentMap[Key]['payload'],
+        respond: (
+          response: ClientToServerEventsArgumentMap[Key]['response']
+        ) => void
+      ) => void;
 };
 
 // eslint-disable-next-line @typescript-eslint/no-empty-interface

@@ -1,8 +1,10 @@
 import { RoomSocketEvents } from '@/constants/events/socket';
 import { RoomModel } from '@/models/RoomModel';
 
-import { DoodlerInterface } from './doodler';
 import { ClientToServerEventsArgument } from './helper';
+import { LobbyListedRoom } from '../lobby';
+
+import { DoodlerInterface } from './doodler';
 
 export type RoomInterface = RoomModel['json'];
 
@@ -27,6 +29,10 @@ export interface RoomClientToServerEventsArgumentMap {
     string,
     { room: RoomInterface; doodlers: DoodlerInterface[] }
   >;
+  [RoomSocketEvents.ON_GET_LOBBY_ROOMS]: ClientToServerEventsArgument<
+    undefined,
+    { rooms: LobbyListedRoom[]; onlineCount?: number }
+  >;
 }
 
 export interface RoomServerToClientEvents {
@@ -36,4 +42,5 @@ export interface RoomServerToClientEvents {
   [RoomSocketEvents.EMIT_DOODLER_LEAVE]: (args: {
     doodlerId: DoodlerInterface['id'];
   }) => void;
+  [RoomSocketEvents.EMIT_LOBBY_ROOMS_UPDATED]: (args: { rooms: LobbyListedRoom[]; onlineCount?: number }) => void;
 }

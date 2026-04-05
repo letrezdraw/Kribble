@@ -92,15 +92,15 @@ const useCanvasActions = (optionConfig?: OptionConfig) => {
 
   const scheduleNetworkFlush = () => {
     if (rafFlushIdRef.current != null) return;
-    rafFlushIdRef.current = requestAnimationFrame(() => {
+    rafFlushIdRef.current = window.setTimeout(() => {
       rafFlushIdRef.current = null;
       flushNetworkBatch(false);
-    });
+    }, 33); // Throttles network emits to ~30 FPS (33ms) to prevent socket overload
   };
 
   const cancelScheduledFlush = () => {
     if (rafFlushIdRef.current != null) {
-      cancelAnimationFrame(rafFlushIdRef.current);
+      window.clearTimeout(rafFlushIdRef.current);
       rafFlushIdRef.current = null;
     }
   };

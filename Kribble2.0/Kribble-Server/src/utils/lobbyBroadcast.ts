@@ -1,4 +1,5 @@
 import type { Server } from 'socket.io';
+import { RoomSocketEvents } from '@/constants/events/socket';
 
 import RoomServiceInstance from '@/services/room/RoomService';
 
@@ -13,6 +14,6 @@ export function scheduleLobbyRoomsBroadcast(): void {
   if (!ioRef) return;
   void RoomServiceInstance.listLobbyRoomSummaries().then((rooms) => {
     const onlineCount = ioRef!.engine.clientsCount;
-    ioRef!.emit('lobby:rooms-updated', { rooms, onlineCount });
+    ioRef!.emit(RoomSocketEvents.EMIT_LOBBY_ROOMS_UPDATED, { rooms, onlineCount });
   });
 }

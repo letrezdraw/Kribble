@@ -10,6 +10,7 @@ import { LandingMobile, LoginMobile, LobbyMobile, GameRoomMobile, ProfileMobile,
 import VersionDisplay from './components/VersionDisplay';
 import ErrorBoundary from './components/ErrorBoundary';
 import './components/ErrorBoundary.css';
+import K2GameRoomProvider from './k2/K2GameRoomProvider';
 
 
 
@@ -34,7 +35,7 @@ function App() {
         <Route path="/" element={user ? <Navigate to="/lobby" /> : (isMobile ? <LandingMobile /> : <Landing />)} />
         <Route path="/login" element={user ? <Navigate to="/lobby" /> : (isMobile ? <LoginMobile /> : <Login />)} />
         <Route path="/lobby" element={user ? (isMobile ? <LobbyMobile /> : <Lobby />) : <Navigate to="/login" />} />
-        <Route path="/room/:roomId" element={user ? (isMobile ? <GameRoomMobile /> : <GameRoom />) : <Navigate to="/login" />} />
+        <Route path="/room/:roomId" element={user ? (isMobile ? <GameRoomMobile /> : <K2GameRoomProvider><GameRoom /></K2GameRoomProvider>) : <Navigate to="/login" />} />
         <Route path="/profile" element={user ? (isMobile ? <ProfileMobile /> : <Profile />) : <Navigate to="/login" />} />
         <Route path="/settings" element={user ? (isMobile ? <SettingsMobile /> : <Settings />) : <Navigate to="/login" />} />
         <Route path="*" element={<Navigate to="/" />} />

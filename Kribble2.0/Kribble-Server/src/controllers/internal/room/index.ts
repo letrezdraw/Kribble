@@ -151,6 +151,20 @@ class RoomController implements RoomControllerInterface {
       const doodlers = await DoodlerServiceInstance.getDoodlers(room.doodlers);
       respond({ data: { room, doodlers } });
     };
+
+  /**
+   * Handle when the client requests the lobby rooms list
+   */
+  public handleRoomOnGetLobbyRooms: RoomControllerInterface['handleRoomOnGetLobbyRooms'] =
+    (socket) => async (_payload, respond) => {
+      const rooms = await RoomServiceInstance.listLobbyRoomSummaries();
+      // Socket.io doesn't expose total clients cleanly per namespace statically here without io,
+      // but we can pass undefined for onlineCount or try to get it. Emitting without onlineCount is fine
+      // because onlineCount can be broadcasted globally or managed elsewhere.
+      // Wait, RoomController can access the socket's server instance!
+      const onlineCount = socket.nsp.server.engine.clientsCount;
+      respond({ data: { rooms, onlineCount } });
+    };
 }
 
 export default RoomController;

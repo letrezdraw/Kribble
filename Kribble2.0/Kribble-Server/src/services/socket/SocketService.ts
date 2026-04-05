@@ -29,18 +29,6 @@ class SocketService implements SocketServiceInterface {
       this._registerRoomSocketEvents(socket);
       this._registerGameSocketEvents(socket);
 
-      /** Kribble 1.0–compatible lobby browser (no ACK; not in typed ClientToServerEvents). */
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (socket as any).on('lobby:get-rooms', async () => {
-        try {
-          const rooms = await RoomServiceInstance.listLobbyRoomSummaries();
-          const onlineCount = io.engine.clientsCount;
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (socket as any).emit('lobby:rooms', { rooms, onlineCount });
-        } catch (e) {
-          console.error(e);
-        }
-      });
     });
   };
 
@@ -136,6 +124,11 @@ class SocketService implements SocketServiceInterface {
       socket,
       RoomSocketEvents.ON_GET_ROOM,
       this._controller.handleRoomOnGetRoom(socket)
+    );
+    this._registerCustomSocketEvent(
+      socket,
+      RoomSocketEvents.ON_GET_LOBBY_ROOMS,
+      this._controller.handleRoomOnGetLobbyRooms(socket)
     );
   }
 

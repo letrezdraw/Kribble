@@ -1,0 +1,11 @@
+{
+  "title": "Your profile",
+  "subtitle": "Guest account — name and avatar are stored on this device.",
+  "nameLabel": "Display name",
+  "namePlaceholder": "Enter a nickname",
+  "randomAvatar": "Randomize avatar",
+  "save": "Save",
+  "saved": "Profile saved",
+  "backHome": "Back to home",
+  "hint": "When you join a game, other players see this name and avatar."
+}

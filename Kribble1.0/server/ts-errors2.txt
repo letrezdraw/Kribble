@@ -1,0 +1,52 @@
+src/k2/controllers/index.ts(1,31): error TS2307: Cannot find module './internal/doodler.js' or its corresponding type declarations.
+src/k2/controllers/index.ts(3,28): error TS2307: Cannot find module './internal/game.js' or its corresponding type declarations.
+src/k2/controllers/index.ts(5,28): error TS2307: Cannot find module './internal/room.js' or its corresponding type declarations.
+src/k2/controllers/index.ts(7,30): error TS2307: Cannot find module './internal/socket.js' or its corresponding type declarations.
+src/k2/controllers/internal/doodler/index.ts(14,7): error TS18046: 'respond' is of type 'unknown'.
+src/k2/controllers/internal/doodler/index.ts(27,9): error TS2698: Spread types may only be created from object types.
+src/k2/controllers/internal/doodler/index.ts(29,7): error TS18046: 'respond' is of type 'unknown'.
+src/k2/controllers/internal/doodler/interface.ts(2,50): error TS2307: Cannot find module '../../../types/socket.js' or its corresponding type declarations.
+src/k2/controllers/internal/game/index.ts(23,55): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'string'.
+src/k2/controllers/internal/game/index.ts(30,7): error TS18046: 'respond' is of type 'unknown'.
+src/k2/controllers/internal/game/index.ts(40,15): error TS2339: Property 'roomId' does not exist on type 'unknown'.
+src/k2/controllers/internal/game/index.ts(40,23): error TS2339: Property 'canvasOperation' does not exist on type 'unknown'.
+src/k2/controllers/internal/game/index.ts(54,9): error TS2349: This expression is not callable.
+  Type '{}' has no call signatures.
+src/k2/controllers/internal/game/index.ts(60,15): error TS2339: Property 'roomId' does not exist on type 'unknown'.
+src/k2/controllers/internal/game/index.ts(60,23): error TS2339: Property 'word' does not exist on type 'unknown'.
+src/k2/controllers/internal/game/index.ts(72,7): error TS18046: 'respond' is of type 'unknown'.
+src/k2/controllers/internal/game/index.ts(77,15): error TS2339: Property 'roomId' does not exist on type 'unknown'.
+src/k2/controllers/internal/game/index.ts(77,23): error TS2339: Property 'message' does not exist on type 'unknown'.
+src/k2/controllers/internal/game/index.ts(100,11): error TS18046: 'respond' is of type 'unknown'.
+src/k2/controllers/internal/game/index.ts(113,11): error TS18046: 'respond' is of type 'unknown'.
+src/k2/controllers/internal/game/index.ts(120,7): error TS18046: 'respond' is of type 'unknown'.
+src/k2/controllers/internal/game/index.ts(129,15): error TS2339: Property 'roomId' does not exist on type 'unknown'.
+src/k2/controllers/internal/game/index.ts(129,23): error TS2339: Property 'options' does not exist on type 'unknown'.
+src/k2/controllers/internal/game/index.ts(161,7): error TS18046: 'respond' is of type 'unknown'.
+src/k2/controllers/internal/game/index.ts(166,15): error TS2339: Property 'roomId' does not exist on type 'unknown'.
+src/k2/controllers/internal/game/index.ts(166,23): error TS2339: Property 'options' does not exist on type 'unknown'.
+src/k2/controllers/internal/game/index.ts(184,7): error TS18046: 'respond' is of type 'unknown'.
+src/k2/controllers/internal/game/interface.ts(2,50): error TS2307: Cannot find module '../../../types/socket.js' or its corresponding type declarations.
+src/k2/controllers/internal/room/index.ts(49,7): error TS18046: 'respond' is of type 'unknown'.
+src/k2/controllers/internal/room/index.ts(58,15): error TS2339: Property 'roomId' does not exist on type 'unknown'.
+src/k2/controllers/internal/room/index.ts(98,7): error TS18046: 'respond' is of type 'unknown'.
+src/k2/controllers/internal/room/index.ts(107,15): error TS2339: Property 'roomId' does not exist on type 'unknown'.
+src/k2/controllers/internal/room/index.ts(117,7): error TS18046: 'respond' is of type 'unknown'.
+src/k2/controllers/internal/room/index.ts(137,7): error TS18046: 'respond' is of type 'unknown'.
+src/k2/controllers/internal/room/index.ts(148,9): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'string'.
+src/k2/controllers/internal/room/index.ts(152,7): error TS18046: 'respond' is of type 'unknown'.
+src/k2/controllers/internal/room/index.ts(166,7): error TS18046: 'respond' is of type 'unknown'.
+src/k2/controllers/internal/room/interface.ts(2,50): error TS2307: Cannot find module '../../../types/socket.js' or its corresponding type declarations.
+src/k2/controllers/internal/socket/index.ts(16,29): error TS7006: Parameter 'id' implicitly has an 'any' type.
+src/k2/controllers/internal/socket/interface.ts(1,28): error TS2307: Cannot find module '../../../types/socket.js' or its corresponding type declarations.
+src/k2/models/GameModel.ts(145,36): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(timeout: string | number | Timeout | undefined): void', gave the following error.
+    Argument of type 'Timer' is not assignable to parameter of type 'string | number | Timeout | undefined'.
+      Type 'Timer' is missing the following properties from type 'Timeout': close, _onTimeout, [Symbol.dispose]
+  Overload 2 of 2, '(id: number | undefined): void', gave the following error.
+    Argument of type 'Timer' is not assignable to parameter of type 'number'.
+src/k2/services/socket/interface.ts(1,46): error TS2307: Cannot find module '../../types/socket.js' or its corresponding type declarations.
+src/k2/services/socket/SocketService.ts(7,49): error TS2307: Cannot find module '../../controllers.js' or its corresponding type declarations.
+src/k2/services/socket/SocketService.ts(9,58): error TS2307: Cannot find module '../../types/socket.js' or its corresponding type declarations.
+src/k2/services/socket/SocketService.ts(23,26): error TS7006: Parameter 'socket' implicitly has an 'any' type.
+src/k2/utils/words.ts(1,19): error TS2307: Cannot find module '../constants/words.json.js' or its corresponding type declarations.

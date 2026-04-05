@@ -35,4 +35,9 @@ export interface RoomControllerInterface {
   ) => (
     ...args: Parameters<ClientToServerEvents[RoomSocketEvents.ON_GET_ROOM]>
   ) => void;
+  handleRoomOnGetLobbyRooms: (
+    socket: SocketType
+  ) => (
+    ...args: Parameters<ClientToServerEvents[RoomSocketEvents.ON_GET_LOBBY_ROOMS]>
+  ) => void;
 }

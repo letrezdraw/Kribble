@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 
 import { DoodlerEvents, RoomEvents } from '@/constants/Events';
-import { socket, useSocket } from '@/contexts/socket';
+import { useSocket } from '@/contexts/socket';
 import { useUser } from '@/contexts/user';
 import { ErrorFromServer } from '@/utils/error';
 import { getRankByLevel } from '@/utils/v1/ranks';
@@ -90,7 +90,7 @@ const ParticleBackground = () => {
 
 export default function LobbyPage() {
   const { user, resetUser } = useUser();
-  const { asyncEmitEvent } = useSocket();
+  const { asyncEmitEvent, registerEvent, unregisterEvent } = useSocket();
   const navigate = useNavigate();
   const lobbyRef = useRef<HTMLDivElement>(null);
 
@@ -130,12 +130,19 @@ export default function LobbyPage() {
   const [showLeaderboard, setShowLeaderboard] = useState(false);
 
   useEffect(() => {
-    const raw = socket as unknown as IoClientSocket;
-
-    const refresh = () => {
-      raw.emit('lobby:get-rooms');
+    const refresh = async () => {
+      try {
+        const data = await asyncEmitEvent(RoomEvents.EMIT_GET_LOBBY_ROOMS, undefined);
+        setRooms(data.rooms || []);
+        if (typeof data.onlineCount === 'number') {
+          setOnlineCount(data.onlineCount);
+        }
+        setLoading(false);
+      } catch (err) {
+        // ignore timeout/error
+      }
     };
-    refresh();
+    void refresh();
 
     const onLobbyData = (data: {
       rooms: Room[];
@@ -148,17 +155,15 @@ export default function LobbyPage() {
       setLoading(false);
     };
 
-    raw.on('lobby:rooms', onLobbyData);
-    raw.on('lobby:rooms-updated', onLobbyData);
+    registerEvent(RoomEvents.ON_LOBBY_ROOMS_UPDATED, onLobbyData);
 
-    const interval = setInterval(refresh, 3000);
+    const interval = window.setInterval(refresh, 3000);
 
     return () => {
-      clearInterval(interval);
-      raw.off('lobby:rooms', onLobbyData);
-      raw.off('lobby:rooms-updated', onLobbyData);
+      window.clearInterval(interval);
+      unregisterEvent(RoomEvents.ON_LOBBY_ROOMS_UPDATED, onLobbyData);
     };
-  }, []);
+  }, [asyncEmitEvent, registerEvent, unregisterEvent]);
 
   useEffect(() => {
     let filtered = rooms;

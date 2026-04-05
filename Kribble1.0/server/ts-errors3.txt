@@ -1,0 +1,1 @@
+src/k2/utils/words.ts(1,19): error TS2307: Cannot find module '../constants/words.json" assert { type: "json" }; //' or its corresponding type declarations.
