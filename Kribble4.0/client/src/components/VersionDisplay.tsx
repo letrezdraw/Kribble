@@ -9,7 +9,7 @@ const BUILD_DATE = new Date().toISOString().split('T')[0]; // Today's date
 export default function VersionDisplay() {
   return (
     <div className="version-display">
-        <span className="version-label">v{BUILD_VERSION}-settings</span>
+        <span className="version-label">v{BUILD_VERSION}</span>
 
 
     </div>

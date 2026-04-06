@@ -13,6 +13,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { ToolType } from '../components/canvas/types';
 import Button from '../components/Button';
 import DrawingCanvas from '../components/canvas/DrawingCanvas';
+import Confetti from 'react-confetti';
+import { useWindowSize } from 'react-use';
 import './GameRoom.css';
 
 
@@ -56,6 +58,8 @@ export default function GameRoom() {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showSettings, setShowSettings] = useState(true);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const { width, height } = useWindowSize();
 
   const [gameSettings, setGameSettings] = useState({
     maxPlayers: room?.maxPlayers || 8,
@@ -572,6 +576,7 @@ export default function GameRoom() {
           {room?.phase === 'roundEnd' && (
 
             <div className="round-end-panel">
+              <Confetti width={width} height={height} recycle={false} numberOfPieces={200} />
               <h3>Round Complete!</h3>
               <p className="word-reveal">The word was: <strong>{gameState.currentWord}</strong></p>
               <div className="round-scores">
@@ -591,6 +596,7 @@ export default function GameRoom() {
           {room?.phase === 'gameEnd' && rankings && (
 
             <div className="game-end-panel">
+              <Confetti width={width} height={height} numberOfPieces={500} recycle={true} />
               <Trophy size={48} className="trophy-icon" />
               <h2>Game Over!</h2>
               <div className="final-standings">

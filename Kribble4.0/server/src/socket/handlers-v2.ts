@@ -477,6 +477,17 @@ export function setupSocketHandlers(io: Server) {
         });
         emitRoomState(io, joinedRoom);
 
+        // System chat message for join
+        if (!isReconnect) {
+          io.to(joinedRoom.id).emit('chat:message', {
+            userId: 'system',
+            username: 'System',
+            message: `${player.username} joined the room`,
+            isSystem: true,
+            timestamp: Date.now(),
+          });
+        }
+
         // Notify lobby
         io.emit('lobby:rooms-updated', {
           rooms: getActiveRooms().map(r => ({
@@ -486,6 +497,8 @@ export function setupSocketHandlers(io: Server) {
             playerCount: r.players.size,
             maxPlayers: r.settings.maxPlayers,
             phase: r.phase,
+            isPrivate: r.settings.isPrivate,
+            gameMode: r.settings.gameMode,
           })),
         });
 
@@ -519,9 +532,18 @@ export function setupSocketHandlers(io: Server) {
             userId,
             username: player.username,
             newHostId: updatedRoom.hostId,
-            room: serializeRoom(updatedRoom), // Send full updated room
+            room: serializeRoom(updatedRoom),
           });
           emitRoomState(io, updatedRoom);
+
+          // System chat message for leave
+          io.to(roomId).emit('chat:message', {
+            userId: 'system',
+            username: 'System',
+            message: `${player.username} left the room`,
+            isSystem: true,
+            timestamp: Date.now(),
+          });
         } else {
           io.to(roomId).emit('room:player-left', {
             userId,
