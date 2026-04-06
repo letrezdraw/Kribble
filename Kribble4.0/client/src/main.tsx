@@ -9,28 +9,10 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import './styles/design-system.css';
 import './styles/global.css';
 import './styles/mobile.css';
-
-// Load and apply settings on app startup
-const loadSettings = () => {
-  try {
-    const saved = localStorage.getItem('kribble_settings');
-    if (saved) {
-      const settings = JSON.parse(saved);
-      
-      // Set global flags
-      window.__SOUND_ENABLED__ = settings.sound !== false;
-      window.__MUSIC_ENABLED__ = settings.music !== false;
-      window.__HAPTIC_ENABLED__ = settings.haptic !== false;
-      window.__CHAT_ENABLED__ = settings.chatEnabled !== false;
-      window.__NOTIFICATIONS_ENABLED__ = settings.notifications !== false;
-    }
-  } catch (e) {
-    // Silently handle errors
-  }
-};
+import { applySettings, loadSettings } from './utils/settings';
 
 // Load settings immediately
-loadSettings();
+applySettings(loadSettings());
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

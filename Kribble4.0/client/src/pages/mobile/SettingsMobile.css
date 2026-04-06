@@ -250,3 +250,28 @@
 .settings-mobile-compact .footer-links button:hover {
   color: var(--text-primary);
 }
+
+.settings-mobile-compact .toggle-compact:disabled,
+.settings-mobile-compact .setting-item-compact.action-item:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.settings-mobile-compact .settings-inline-message {
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-mobile-compact .settings-inline-message.error {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fda4af;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.settings-mobile-compact .settings-inline-message.success {
+  background: rgba(16, 185, 129, 0.12);
+  color: #86efac;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}

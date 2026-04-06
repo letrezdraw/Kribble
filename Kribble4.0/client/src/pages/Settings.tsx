@@ -1,157 +1,69 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, User, Bell, Shield, Palette, Volume2, Moon, Globe, Smartphone, ChevronRight } from 'lucide-react';
+import { ArrowLeft, User, Bell, Shield, Palette } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme, type Theme } from '../contexts/ThemeContext';
 import api from '../services/api';
 import Button from '../components/Button';
+import {
+  DEFAULT_SETTINGS,
+  applySettings,
+  getPersistedSettingsPayload,
+  loadSettings,
+  saveSettingsToStorage,
+} from '../utils/settings';
 import './Settings.css';
-
-// Default settings
-const DEFAULT_SETTINGS = {
-  username: '',
-  email: '',
-  theme: 'dark',
-  sound: true,
-  music: true,
-  notifications: true,
-  emailNotifications: false,
-  profilePublic: true,
-  chatEnabled: true,
-  language: 'en',
-  haptic: true,
-  gameInvites: true,
-  friendRequests: true,
-};
-
-// Load settings from localStorage
-const loadSettings = () => {
-  try {
-    const saved = localStorage.getItem('kribble_settings');
-    if (saved) {
-      return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
-    }
-  } catch (e) {
-    // Silently handle localStorage errors - use defaults
-  }
-  return DEFAULT_SETTINGS;
-};
-
-// Save settings to localStorage
-const saveSettingsToStorage = (settings: typeof DEFAULT_SETTINGS) => {
-  try {
-    localStorage.setItem('kribble_settings', JSON.stringify(settings));
-  } catch (e) {
-    // Silently handle localStorage errors
-  }
-};
-
-// Apply theme to document
-const applyTheme = (theme: string) => {
-  document.documentElement.setAttribute('data-theme', theme);
-  if (theme === 'dark') {
-    document.body.style.background = 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)';
-  } else {
-    document.body.style.background = 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)';
-  }
-};
-
-// Apply sound setting
-const applySound = (enabled: boolean) => {
-  window.__SOUND_ENABLED__ = enabled;
-};
-
-// Apply music setting
-const applyMusic = (enabled: boolean) => {
-  window.__MUSIC_ENABLED__ = enabled;
-  const audio = document.getElementById('bg-music') as HTMLAudioElement;
-  if (audio) {
-    if (enabled) {
-      audio.play().catch(() => {});
-    } else {
-      audio.pause();
-    }
-  }
-};
-
-// Apply haptic setting
-const applyHaptic = (enabled: boolean) => {
-  window.__HAPTIC_ENABLED__ = enabled;
-};
-
-// Apply chat setting
-const applyChat = (enabled: boolean) => {
-  window.__CHAT_ENABLED__ = enabled;
-  document.body.setAttribute('data-chat-enabled', String(enabled));
-};
-
-// Apply notifications setting
-const applyNotifications = (enabled: boolean) => {
-  if (enabled && 'Notification' in window) {
-    Notification.requestPermission();
-  }
-  window.__NOTIFICATIONS_ENABLED__ = enabled;
-};
-
-// Apply all settings
-const applyAllSettings = (settings: typeof DEFAULT_SETTINGS) => {
-  applyTheme(settings.theme);
-  applySound(settings.sound);
-  applyMusic(settings.music);
-  applyHaptic(settings.haptic);
-  applyChat(settings.chatEnabled);
-  applyNotifications(settings.notifications);
-};
 
 export default function Settings() {
   const navigate = useNavigate();
-  const { user } = useAuth();
-  
+  const { user, updateUser } = useAuth();
+  const { theme, setTheme } = useTheme();
+
   const [activeTab, setActiveTab] = useState<'account' | 'preferences' | 'privacy' | 'notifications'>('account');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  
+
   const [settings, setSettings] = useState(() => {
     const loaded = loadSettings();
     return {
       ...loaded,
+      theme,
       username: user?.username || loaded.username || '',
       email: user?.email || loaded.email || '',
     };
   });
 
-  // Password change state
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  // Apply settings on mount
   useEffect(() => {
-    applyAllSettings(settings);
+    applySettings(settings);
   }, []);
 
-  // Load settings from API on mount
   useEffect(() => {
+    if (!user?.id) return;
+
     const fetchSettings = async () => {
-      if (!user?.id) return;
-      
       setLoading(true);
       try {
         const response = await api.get(`/users/${user.id}/settings`);
-        if (response.data.settings) {
-          const newSettings = {
-            ...settings,
-            ...response.data.settings,
-            username: user?.username || settings.username,
-            email: user?.email || settings.email,
-          };
-          setSettings(newSettings);
-          applyAllSettings(newSettings);
-        }
-      } catch (err: any) {
-        // Silently handle API error - fall back to localStorage
+        const nextSettings = {
+          ...DEFAULT_SETTINGS,
+          ...loadSettings(),
+          ...response.data.settings,
+          theme: (response.data.settings?.theme || theme) as Theme,
+          username: user.username || '',
+          email: user.email || '',
+        };
+        setSettings(nextSettings);
+        applySettings(nextSettings);
+        setTheme(nextSettings.theme);
+      } catch {
+        // Fall back to local state.
       } finally {
         setLoading(false);
       }
@@ -160,44 +72,37 @@ export default function Settings() {
     fetchSettings();
   }, [user?.id]);
 
-  // Persist settings to localStorage whenever they change
   useEffect(() => {
     saveSettingsToStorage(settings);
-    applyAllSettings(settings);
-  }, [settings]);
+    applySettings(settings);
+    setTheme(settings.theme);
+  }, [settings, setTheme]);
 
   const handleSave = async () => {
     setSaving(true);
     setError('');
     setSuccess('');
-    
+
     try {
-      // Save to localStorage first
       saveSettingsToStorage(settings);
-      
-      // Apply all settings immediately
-      applyAllSettings(settings);
-      
-      // Save to API if user is logged in
+      applySettings(settings);
+      setTheme(settings.theme);
+
+      if (user?.id && settings.username.trim() && settings.username !== user.username) {
+        const response = await api.put('/auth/profile', {
+          username: settings.username.trim(),
+        });
+        updateUser(response.data.user);
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+      }
+
       if (user?.id) {
         await api.put(`/users/${user.id}/settings`, {
-          settings: {
-            theme: settings.theme,
-            sound: settings.sound,
-            music: settings.music,
-            notifications: settings.notifications,
-            emailNotifications: settings.emailNotifications,
-            profilePublic: settings.profilePublic,
-            chatEnabled: settings.chatEnabled,
-            language: settings.language,
-            haptic: settings.haptic,
-            gameInvites: settings.gameInvites,
-            friendRequests: settings.friendRequests,
-          }
+          settings: getPersistedSettingsPayload(settings),
         });
       }
-      
-      setSuccess('Settings saved successfully!');
+
+      setSuccess('Settings saved successfully.');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to save settings');
@@ -211,23 +116,24 @@ export default function Settings() {
       setError('Please enter both current and new password');
       return;
     }
+
     if (newPassword.length < 6) {
       setError('New password must be at least 6 characters');
       return;
     }
-    
+
     setSaving(true);
     setError('');
     setSuccess('');
-    
+
     try {
       await api.put('/auth/password', {
         currentPassword,
-        newPassword
+        newPassword,
       });
-      setSuccess('Password changed successfully!');
       setCurrentPassword('');
       setNewPassword('');
+      setSuccess('Password changed successfully.');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to change password');
@@ -241,10 +147,10 @@ export default function Settings() {
       setShowDeleteConfirm(true);
       return;
     }
-    
+
     setSaving(true);
     setError('');
-    
+
     try {
       await api.delete('/auth/account');
       localStorage.removeItem('token');
@@ -268,22 +174,20 @@ export default function Settings() {
 
   return (
     <div className="settings-page">
-      {/* Header */}
       <header className="settings-header">
         <Button variant="ghost" size="sm" onClick={() => navigate('/profile')}>
           <ArrowLeft size={20} />
         </Button>
         <h1>Settings</h1>
-        <div style={{ width: 40 }}></div>
+        <div style={{ width: 40 }} />
       </header>
 
-      {/* Tabs */}
       <div className="settings-tabs">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             className={`settings-tab ${activeTab === tab.id ? 'active' : ''}`}
-            onClick={() => setActiveTab(tab.id as any)}
+            onClick={() => setActiveTab(tab.id as typeof activeTab)}
           >
             <tab.icon size={18} />
             {tab.label}
@@ -291,7 +195,6 @@ export default function Settings() {
         ))}
       </div>
 
-      {/* Content */}
       <main className="settings-content">
         <motion.div
           key={activeTab}
@@ -302,7 +205,7 @@ export default function Settings() {
           {activeTab === 'account' && (
             <div className="settings-section">
               <h2>Account Settings</h2>
-              
+
               <div className="form-group">
                 <label>Username</label>
                 <input
@@ -318,29 +221,30 @@ export default function Settings() {
                 <input
                   type="email"
                   value={settings.email}
-                  onChange={(e) => setSettings({ ...settings, email: e.target.value })}
-                  placeholder="Enter email"
+                  readOnly
+                  disabled
+                  placeholder="Email cannot be changed yet"
                 />
               </div>
 
               <div className="form-group">
                 <label>Change Password</label>
-                <input 
-                  type="password" 
+                <input
+                  type="password"
                   placeholder="Current password"
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
                   style={{ marginBottom: '12px' }}
                 />
-                <input 
-                  type="password" 
+                <input
+                  type="password"
                   placeholder="New password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   style={{ marginBottom: '12px' }}
                 />
-                <Button 
-                  variant="secondary" 
+                <Button
+                  variant="secondary"
                   onClick={handlePasswordChange}
                   loading={saving}
                   disabled={saving || !currentPassword || !newPassword}
@@ -352,8 +256,8 @@ export default function Settings() {
 
               {error && <div className="error-message" style={{ marginBottom: '16px' }}>{error}</div>}
               {success && <div className="success-message" style={{ marginBottom: '16px', color: '#4ade80' }}>{success}</div>}
-              
-              <Button variant="primary" onClick={handleSave} className="save-btn" loading={saving} disabled={saving}>
+
+              <Button variant="primary" onClick={handleSave} className="save-btn" loading={saving || loading} disabled={saving}>
                 Save Changes
               </Button>
             </div>
@@ -362,17 +266,17 @@ export default function Settings() {
           {activeTab === 'preferences' && (
             <div className="settings-section">
               <h2>Preferences</h2>
-              
+
               <div className="toggle-item">
                 <div>
                   <label>Sound Effects</label>
                   <p>Enable game sound effects</p>
                 </div>
-                <button 
+                <button
                   className={`toggle-switch ${settings.sound ? 'active' : ''}`}
                   onClick={() => setSettings({ ...settings, sound: !settings.sound })}
                 >
-                  <span className="toggle-knob"></span>
+                  <span className="toggle-knob" />
                 </button>
               </div>
 
@@ -381,11 +285,11 @@ export default function Settings() {
                   <label>Background Music</label>
                   <p>Enable background music</p>
                 </div>
-                <button 
+                <button
                   className={`toggle-switch ${settings.music ? 'active' : ''}`}
                   onClick={() => setSettings({ ...settings, music: !settings.music })}
                 >
-                  <span className="toggle-knob"></span>
+                  <span className="toggle-knob" />
                 </button>
               </div>
 
@@ -394,25 +298,39 @@ export default function Settings() {
                   <label>Haptic Feedback</label>
                   <p>Vibrate on touch interactions</p>
                 </div>
-                <button 
+                <button
                   className={`toggle-switch ${settings.haptic ? 'active' : ''}`}
                   onClick={() => setSettings({ ...settings, haptic: !settings.haptic })}
                 >
-                  <span className="toggle-knob"></span>
+                  <span className="toggle-knob" />
                 </button>
               </div>
 
               <div className="toggle-item">
                 <div>
-                  <label>Dark Mode</label>
-                  <p>Use dark theme</p>
+                  <label>Reduced Motion</label>
+                  <p>Reduce non-essential motion effects</p>
                 </div>
-                <button 
-                  className={`toggle-switch ${settings.theme === 'dark' ? 'active' : ''}`}
-                  onClick={() => setSettings({ ...settings, theme: settings.theme === 'dark' ? 'light' : 'dark' })}
+                <button
+                  className={`toggle-switch ${settings.reducedMotion ? 'active' : ''}`}
+                  onClick={() => setSettings({ ...settings, reducedMotion: !settings.reducedMotion })}
                 >
-                  <span className="toggle-knob"></span>
+                  <span className="toggle-knob" />
                 </button>
+              </div>
+
+              <div className="form-group" style={{ marginTop: '24px' }}>
+                <label>Theme</label>
+                <select
+                  value={settings.theme}
+                  onChange={(e) => setSettings({ ...settings, theme: e.target.value as Theme })}
+                  className="settings-select"
+                >
+                  <option value="midnight">Midnight</option>
+                  <option value="ocean">Ocean</option>
+                  <option value="sunset">Sunset</option>
+                  <option value="forest">Forest</option>
+                </select>
               </div>
 
               <div className="form-group" style={{ marginTop: '24px' }}>
@@ -420,34 +338,25 @@ export default function Settings() {
                 <select
                   value={settings.language}
                   onChange={(e) => setSettings({ ...settings, language: e.target.value })}
-                  style={{
-                    width: '100%',
-                    padding: '16px',
-                    background: 'rgba(255,255,255,0.05)',
-                    borderRadius: '12px',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    color: 'white',
-                    fontSize: '1rem',
-                    cursor: 'pointer'
-                  }}
+                  className="settings-select"
                 >
-                  <option value="en" style={{ background: '#1a1a2e' }}>English</option>
-                  <option value="es" style={{ background: '#1a1a2e' }}>Spanish</option>
-                  <option value="fr" style={{ background: '#1a1a2e' }}>French</option>
-                  <option value="de" style={{ background: '#1a1a2e' }}>German</option>
-                  <option value="it" style={{ background: '#1a1a2e' }}>Italian</option>
-                  <option value="pt" style={{ background: '#1a1a2e' }}>Portuguese</option>
-                  <option value="ru" style={{ background: '#1a1a2e' }}>Russian</option>
-                  <option value="zh" style={{ background: '#1a1a2e' }}>Chinese</option>
-                  <option value="ja" style={{ background: '#1a1a2e' }}>Japanese</option>
-                  <option value="ko" style={{ background: '#1a1a2e' }}>Korean</option>
+                  <option value="en">English</option>
+                  <option value="es">Spanish</option>
+                  <option value="fr">French</option>
+                  <option value="de">German</option>
+                  <option value="it">Italian</option>
+                  <option value="pt">Portuguese</option>
+                  <option value="ru">Russian</option>
+                  <option value="zh">Chinese</option>
+                  <option value="ja">Japanese</option>
+                  <option value="ko">Korean</option>
                 </select>
               </div>
 
               {error && <div className="error-message" style={{ marginBottom: '16px' }}>{error}</div>}
               {success && <div className="success-message" style={{ marginBottom: '16px', color: '#4ade80' }}>{success}</div>}
-              
-              <Button variant="primary" onClick={handleSave} className="save-btn" loading={saving} disabled={saving}>
+
+              <Button variant="primary" onClick={handleSave} className="save-btn" loading={saving || loading} disabled={saving}>
                 Save Changes
               </Button>
             </div>
@@ -456,17 +365,17 @@ export default function Settings() {
           {activeTab === 'privacy' && (
             <div className="settings-section">
               <h2>Privacy Settings</h2>
-              
+
               <div className="toggle-item">
                 <div>
                   <label>Public Profile</label>
                   <p>Allow others to view your profile</p>
                 </div>
-                <button 
+                <button
                   className={`toggle-switch ${settings.profilePublic ? 'active' : ''}`}
                   onClick={() => setSettings({ ...settings, profilePublic: !settings.profilePublic })}
                 >
-                  <span className="toggle-knob"></span>
+                  <span className="toggle-knob" />
                 </button>
               </div>
 
@@ -475,15 +384,15 @@ export default function Settings() {
                   <label>Chat Messages</label>
                   <p>Allow others to send you messages</p>
                 </div>
-                <button 
+                <button
                   className={`toggle-switch ${settings.chatEnabled ? 'active' : ''}`}
                   onClick={() => setSettings({ ...settings, chatEnabled: !settings.chatEnabled })}
                 >
-                  <span className="toggle-knob"></span>
+                  <span className="toggle-knob" />
                 </button>
               </div>
 
-              <div style={{ 
+              <div style={{
                 marginTop: '24px',
                 padding: '16px',
                 background: 'rgba(241, 91, 181, 0.1)',
@@ -499,15 +408,15 @@ export default function Settings() {
                 </p>
                 {showDeleteConfirm && (
                   <p style={{ fontSize: '0.85rem', color: '#F15BB5', marginBottom: '12px', fontWeight: 600 }}>
-                    ⚠️ Are you sure? This will permanently delete your account!
+                    Are you sure? This will permanently delete your account.
                   </p>
                 )}
-                <Button 
-                  variant="secondary" 
+                <Button
+                  variant="secondary"
                   onClick={handleDeleteAccount}
                   loading={saving}
                   disabled={saving}
-                  style={{ 
+                  style={{
                     width: '100%',
                     background: showDeleteConfirm ? 'rgba(239, 68, 68, 0.3)' : 'rgba(241, 91, 181, 0.2)',
                     color: showDeleteConfirm ? '#ef4444' : '#F15BB5',
@@ -517,14 +426,7 @@ export default function Settings() {
                   {showDeleteConfirm ? 'Click again to confirm deletion' : 'Delete Account'}
                 </Button>
                 {showDeleteConfirm && (
-                  <Button 
-                    variant="ghost" 
-                    onClick={() => setShowDeleteConfirm(false)}
-                    style={{ 
-                      width: '100%',
-                      marginTop: '8px'
-                    }}
-                  >
+                  <Button variant="ghost" onClick={() => setShowDeleteConfirm(false)} style={{ width: '100%', marginTop: '8px' }}>
                     Cancel
                   </Button>
                 )}
@@ -532,8 +434,8 @@ export default function Settings() {
 
               {error && <div className="error-message" style={{ marginBottom: '16px' }}>{error}</div>}
               {success && <div className="success-message" style={{ marginBottom: '16px', color: '#4ade80' }}>{success}</div>}
-              
-              <Button variant="primary" onClick={handleSave} className="save-btn" loading={saving} disabled={saving}>
+
+              <Button variant="primary" onClick={handleSave} className="save-btn" loading={saving || loading} disabled={saving}>
                 Save Changes
               </Button>
             </div>
@@ -542,17 +444,17 @@ export default function Settings() {
           {activeTab === 'notifications' && (
             <div className="settings-section">
               <h2>Notification Settings</h2>
-              
+
               <div className="toggle-item">
                 <div>
                   <label>Push Notifications</label>
                   <p>Receive notifications in browser</p>
                 </div>
-                <button 
+                <button
                   className={`toggle-switch ${settings.notifications ? 'active' : ''}`}
                   onClick={() => setSettings({ ...settings, notifications: !settings.notifications })}
                 >
-                  <span className="toggle-knob"></span>
+                  <span className="toggle-knob" />
                 </button>
               </div>
 
@@ -561,11 +463,11 @@ export default function Settings() {
                   <label>Email Notifications</label>
                   <p>Receive updates via email</p>
                 </div>
-                <button 
+                <button
                   className={`toggle-switch ${settings.emailNotifications ? 'active' : ''}`}
                   onClick={() => setSettings({ ...settings, emailNotifications: !settings.emailNotifications })}
                 >
-                  <span className="toggle-knob"></span>
+                  <span className="toggle-knob" />
                 </button>
               </div>
 
@@ -574,11 +476,11 @@ export default function Settings() {
                   <label>Game Invites</label>
                   <p>Get notified when invited to a game</p>
                 </div>
-                <button 
+                <button
                   className={`toggle-switch ${settings.gameInvites ? 'active' : ''}`}
                   onClick={() => setSettings({ ...settings, gameInvites: !settings.gameInvites })}
                 >
-                  <span className="toggle-knob"></span>
+                  <span className="toggle-knob" />
                 </button>
               </div>
 
@@ -587,18 +489,18 @@ export default function Settings() {
                   <label>Friend Requests</label>
                   <p>Get notified of new friend requests</p>
                 </div>
-                <button 
+                <button
                   className={`toggle-switch ${settings.friendRequests ? 'active' : ''}`}
                   onClick={() => setSettings({ ...settings, friendRequests: !settings.friendRequests })}
                 >
-                  <span className="toggle-knob"></span>
+                  <span className="toggle-knob" />
                 </button>
               </div>
 
               {error && <div className="error-message" style={{ marginBottom: '16px' }}>{error}</div>}
               {success && <div className="success-message" style={{ marginBottom: '16px', color: '#4ade80' }}>{success}</div>}
-              
-              <Button variant="primary" onClick={handleSave} className="save-btn" loading={saving} disabled={saving}>
+
+              <Button variant="primary" onClick={handleSave} className="save-btn" loading={saving || loading} disabled={saving}>
                 Save Changes
               </Button>
             </div>
@@ -607,15 +509,4 @@ export default function Settings() {
       </main>
     </div>
   );
-}
-
-// Add global type declarations
-declare global {
-  interface Window {
-    __SOUND_ENABLED__: boolean;
-    __MUSIC_ENABLED__: boolean;
-    __HAPTIC_ENABLED__: boolean;
-    __CHAT_ENABLED__: boolean;
-    __NOTIFICATIONS_ENABLED__: boolean;
-  }
 }
