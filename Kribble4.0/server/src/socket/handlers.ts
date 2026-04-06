@@ -189,6 +189,16 @@ function generateHints(word: string, count: number): string[] {
   return hints;
 }
 
+function resetRoomCanvas(room: Room, io?: Server, syncClients: boolean = false): void {
+  room.canvasState = [];
+  room.canvasRedoState = [];
+  room.commandHistory = [];
+
+  if (io && syncClients) {
+    io.to(room.id).emit('canvas:sync', { commands: [] });
+  }
+}
+
 // Word selection timer (shorter than draw time)
 const wordSelectionTimers = new Map<string, NodeJS.Timeout>();
 const wordSelectionCountdowns = new Map<string, NodeJS.Timeout>();
@@ -214,8 +224,7 @@ function startWordSelection(room: Room, io: Server) {
   }
   
   // Clear canvas state for new round/drawer
-  room.canvasState = [];
-  room.canvasRedoState = [];
+  resetRoomCanvas(room, io, true);
   io.to(room.id).emit('draw:clear');
 
   // DRAWER ROTATION SYSTEM: Track who has drawn this round
@@ -320,6 +329,8 @@ function startDrawingPhase(room: Room, io: Server) {
   room.players.forEach(p => {
     p.hasGuessedCorrectly = false;
   });
+
+  resetRoomCanvas(room, io, true);
   
   // Set phase to drawing
   room.gameState.phase = 'drawing';
@@ -456,8 +467,7 @@ function endTurn(room: Room, io: Server) {
   }
 
   // Clear canvas state and notify clients
-  room.canvasState = [];
-  room.canvasRedoState = [];
+  resetRoomCanvas(room, io, true);
   io.to(room.id).emit('game:round:end');
 
   room.gameState.phase = 'turnEnd';
@@ -541,8 +551,7 @@ function endRound(room: Room, io: Server) {
   }
 
   // Clear canvas state and notify clients
-  room.canvasState = [];
-  room.canvasRedoState = [];
+  resetRoomCanvas(room, io, true);
   io.to(room.id).emit('game:round:end');
 
   // Reset drawer tracking for the round that just ended
@@ -1261,8 +1270,13 @@ export function setupSocketHandlers(io: Server) {
           drawerId: joinedRoom.players[joinedRoom.gameState.currentDrawerIndex]?.id
         });
         
-        if (joinedRoom.gameState.phase === 'drawing' && joinedRoom.canvasState && joinedRoom.canvasState.length > 0) {
-          socket.emit('canvas:sync', { strokes: joinedRoom.canvasState });
+        if (joinedRoom.gameState.phase === 'drawing') {
+          socket.emit('canvas:sync', {
+            commands: joinedRoom.commandHistory || [],
+            strokes: (!joinedRoom.commandHistory || joinedRoom.commandHistory.length === 0)
+              ? (joinedRoom.canvasState || [])
+              : undefined,
+          });
         }
       }
 
@@ -1553,6 +1567,7 @@ export function setupSocketHandlers(io: Server) {
       if (room) {
         room.canvasRedoState = room.canvasState ? [...room.canvasState] : [];
         room.canvasState = [];
+        room.commandHistory = [];
       }
       
       // Broadcast to ALL players including sender (so drawer sees canvas clear too)
@@ -1600,7 +1615,10 @@ export function setupSocketHandlers(io: Server) {
       if (!room) return;
 
       socket.emit('canvas:sync', {
-        strokes: room.canvasState || [],
+        commands: room.commandHistory || [],
+        strokes: (!room.commandHistory || room.commandHistory.length === 0)
+          ? (room.canvasState || [])
+          : undefined,
       });
     });
 

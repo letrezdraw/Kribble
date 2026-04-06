@@ -155,12 +155,30 @@ export function useSocketEvents({
       onRedo?.();
     };
 
-    const handleCanvasSync = (data: { strokes: Stroke[] }) => {
-      if (data.strokes?.length > 0) {
+    const handleCanvasSync = (data: { strokes?: Stroke[]; commands?: unknown[] }) => {
+      if (!staticCtxRef.current) return;
+
+      if (Array.isArray(data.strokes) && data.strokes.length > 0) {
         canvasStateRef.current.strokes = data.strokes;
         canvasStateRef.current.redoStack = [];
-        redrawAllStrokes(staticCtxRef.current!, data.strokes);
+        redrawAllStrokes(staticCtxRef.current, data.strokes);
+        clearLiveCanvas();
+        return;
       }
+
+      // Legacy canvas path still needs to treat an empty sync as authoritative clear.
+      clearCanvas(staticCtxRef.current);
+      clearLiveCanvas();
+      canvasStateRef.current = { strokes: [], redoStack: [] };
+    };
+
+    const handlePhaseChange = (data: { phase?: string }) => {
+      if (!staticCtxRef.current) return;
+      if (data.phase === 'drawing') return;
+
+      clearCanvas(staticCtxRef.current);
+      clearLiveCanvas();
+      canvasStateRef.current = { strokes: [], redoStack: [] };
     };
 
     const handleCanvasHistory = (data: { strokes: Stroke[] }) => {
@@ -185,6 +203,7 @@ export function useSocketEvents({
     socket.on('draw:redo', handleDrawRedo);
     socket.on('canvas:sync', handleCanvasSync);
     socket.on('canvas:history', handleCanvasHistory);
+    socket.on('PHASE_CHANGE', handlePhaseChange);
 
     return () => {
       console.log('[SOCKET] Cleaning up socket listeners');
@@ -198,6 +217,7 @@ export function useSocketEvents({
       socket.off('draw:redo', handleDrawRedo);
       socket.off('canvas:sync', handleCanvasSync);
       socket.off('canvas:history', handleCanvasHistory);
+      socket.off('PHASE_CHANGE', handlePhaseChange);
     };
 
 

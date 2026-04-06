@@ -201,6 +201,7 @@ export default function GameRoom() {
   const visibleTimer = room?.phase === 'wordSelection'
     ? gameState.wordSelectionTimer
     : gameState.turnTimer;
+  const canvasTurnKey = `${room?.roundNumber ?? 0}-${room?.currentDrawerIndex ?? -1}-${room?.phase ?? 'waiting'}`;
 
   const sortedPlayers = [...(room?.players || [])].sort((a: Player, b: Player) => b.score - a.score);
   const connectedPlayers = room?.players.filter((player) => player.connected).length || 0;
@@ -799,6 +800,7 @@ export default function GameRoom() {
           {true && (
             <div className="canvas-wrapper">
               <DrawingCanvas
+                key={canvasTurnKey}
                 isDrawer={isDrawer}
                 brushColor={brushColor}
                 brushSize={brushSize}

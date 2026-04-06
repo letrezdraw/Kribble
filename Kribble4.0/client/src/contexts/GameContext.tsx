@@ -117,6 +117,44 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [reconnecting, setReconnecting] = useState(false);
   const [roomError, setRoomError] = useState<string | null>(null);
 
+  const mergePlayersIntoRoom = useCallback((players: Array<Partial<Player> & { id?: string; userId?: string }>) => {
+    setRoom(prev => {
+      if (!prev) return null;
+
+      const mergedPlayers = prev.players.map(existing => {
+        const incoming = players.find(p => (p.userId || p.id) === existing.userId);
+        if (!incoming) return existing;
+
+        return {
+          ...existing,
+          userId: incoming.userId || incoming.id || existing.userId,
+          username: incoming.username ?? existing.username,
+          avatarId: incoming.avatarId ?? existing.avatarId,
+          score: incoming.score ?? existing.score,
+          isDrawer: incoming.isDrawer ?? existing.isDrawer,
+          isHost: incoming.isHost ?? existing.isHost,
+          connected: incoming.connected ?? existing.connected,
+          connectionState: incoming.connectionState ?? existing.connectionState,
+        };
+      });
+
+      const currentPlayer = mergedPlayers.find(p => p.userId === (currentUserId ?? user?.id ?? null)) || null;
+      setIsDrawer(currentPlayer?.isDrawer || false);
+      setIsHost(currentPlayer?.isHost || prev.hostId === (currentUserId ?? user?.id ?? null));
+      setGameState(gamePrev => ({
+        ...gamePrev,
+        currentDrawer: mergedPlayers.find(p => p.isDrawer) || null,
+        scores: mergedPlayers.map(p => ({ userId: p.userId, score: p.score })),
+      }));
+
+      return {
+        ...prev,
+        hostId: mergedPlayers.find(p => p.isHost)?.userId || prev.hostId,
+        players: mergedPlayers,
+      };
+    });
+  }, [currentUserId, user?.id]);
+
   const applyRoomSnapshot = useCallback((nextRoom: Room, explicitUserId?: string | null) => {
     const activeUserId = explicitUserId ?? currentUserId ?? user?.id ?? null;
     setRoom(nextRoom);
@@ -334,6 +372,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
       applyRoomSnapshot(data.room);
     });
 
+    socket.on('room:players-updated', (data: { players: Array<Partial<Player> & { id?: string; userId?: string }> }) => {
+      mergePlayersIntoRoom(data.players);
+    });
+
     // ==========================================
     // GAME EVENTS - ALL PHASE CHANGES FROM SERVER
     // ==========================================
@@ -346,10 +388,60 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setGameState(prev => ({
         ...prev,
         phase: 'wordSelection',
+        currentWord: '',
+        wordHints: [],
         wordOptions: data.wordOptions,
         wordSelectionTimer: data.selectionTime,
       }));
       setRoom(prev => prev ? { ...prev, phase: 'wordSelection', wordSelectionTimer: data.selectionTime } : prev);
+    });
+
+    socket.on('PHASE_CHANGE', (data: {
+      phase: GamePhase;
+      round?: number;
+      turn?: number;
+      totalRounds?: number;
+      drawerId?: string;
+      word?: string;
+      wordLength?: number;
+    }) => {
+      setRoom(prev => {
+        if (!prev) return null;
+
+        const nextPlayers = prev.players.map(player => ({
+          ...player,
+          isDrawer: data.drawerId ? player.userId === data.drawerId : player.isDrawer,
+        }));
+
+        const currentPlayer = nextPlayers.find(p => p.userId === (currentUserId ?? user?.id ?? null)) || null;
+        setIsDrawer(currentPlayer?.isDrawer || false);
+        setIsHost(currentPlayer?.isHost || prev.hostId === (currentUserId ?? user?.id ?? null));
+
+        setGameState(gamePrev => ({
+          ...gamePrev,
+          phase: data.phase,
+          roundNumber: data.round ?? gamePrev.roundNumber,
+          totalRounds: data.totalRounds ?? gamePrev.totalRounds,
+          currentDrawer: nextPlayers.find(p => p.isDrawer) || null,
+          currentWord: data.phase === 'wordSelection' ? '' : (data.word ?? gamePrev.currentWord),
+          wordHints: data.phase === 'drawing' && data.wordLength
+            ? new Array(data.wordLength).fill('_')
+            : (data.phase === 'wordSelection' ? [] : gamePrev.wordHints),
+          turnAwards: data.phase === 'turnEnd' ? gamePrev.turnAwards : [],
+        }));
+
+        return {
+          ...prev,
+          phase: data.phase,
+          roundNumber: data.round ?? prev.roundNumber,
+          totalRounds: data.totalRounds ?? prev.totalRounds,
+          currentDrawerIndex: data.drawerId
+            ? Math.max(0, nextPlayers.findIndex(p => p.userId === data.drawerId))
+            : prev.currentDrawerIndex,
+          currentWord: data.word ?? (data.phase === 'wordSelection' ? null : prev.currentWord),
+          players: nextPlayers,
+        };
+      });
     });
 
     socket.on('game:drawing-started', (data: { room: Room; wordLength: number }) => {
@@ -491,9 +583,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
       socket.off('room:player-disconnected');
       socket.off('room:settings-updated');
       socket.off('room:state');
+      socket.off('room:players-updated');
       socket.off('game:started');
       socket.off('game:word-selection');
       socket.off('game:drawing-started');
+      socket.off('PHASE_CHANGE');
       socket.off('game:word-reveal');
       socket.off('game:timer-update');
       socket.off('game:selection-timer');

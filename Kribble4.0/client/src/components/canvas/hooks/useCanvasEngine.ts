@@ -1,10 +1,10 @@
 /**
  * useCanvasEngine - Professional Canvas Command Protocol Integration
- * 
+ *
  * This hook provides a complete canvas synchronization system using the
  * unified Canvas Command Protocol. It replaces the legacy stroke-based
  * system with deterministic command-based replication.
- * 
+ *
  * Features:
  * - Real-time command streaming
  * - Deterministic replay for late joiners
@@ -22,10 +22,10 @@ import {
   type RefObject,
 } from 'react';
 import { CanvasEngine } from '../CanvasEngine';
-import type { 
-  CanvasCommand, 
-  StartStrokePayload, 
-  AddPointsPayload, 
+import type {
+  CanvasCommand,
+  StartStrokePayload,
+  AddPointsPayload,
   EndStrokePayload,
   FillPayload,
   Point,
@@ -45,7 +45,6 @@ interface UseCanvasEngineOptions {
 }
 
 export interface UseCanvasEngineReturn {
-  /** True after both canvases are mounted and CanvasEngine is constructed */
   canvasReady: boolean;
   engine: CanvasEngine | null;
   isSynced: boolean;
@@ -72,23 +71,17 @@ export function useCanvasEngine({
   onStrokeComplete,
   onSyncComplete,
 }: UseCanvasEngineOptions): UseCanvasEngineReturn {
-  // Engine reference
   const engineRef = useRef<CanvasEngine | null>(null);
   const [canvasReady, setCanvasReady] = useState(false);
-  
-  // Sync state
   const [isSynced, setIsSynced] = useState(false);
   const [pendingSync, setPendingSync] = useState(false);
   const [commandCount, setCommandCount] = useState(0);
-  
+
   const pendingPointsRef = useRef<Map<string, Point[]>>(new Map());
   const flushRafRef = useRef<number | null>(null);
   const scheduledStrokeIdRef = useRef<string | null>(null);
-
-  // Active stroke tracking
   const activeStrokeIdRef = useRef<string | null>(null);
 
-  // Initialize CanvasEngine after canvases exist (refs are read after layout — not .current from render)
   useLayoutEffect(() => {
     const staticCanvas = staticCanvasRef.current;
     const liveCanvas = liveCanvasRef.current;
@@ -115,66 +108,10 @@ export function useCanvasEngine({
     };
   }, [staticCanvasRef, liveCanvasRef, onStrokeComplete]);
 
-  // Socket event handlers for canvas sync (runs after engine exists)
-  useEffect(() => {
-    if (!socket || !canvasReady || !engineRef.current) return;
-    
-    // Handle incoming commands from other players
-    const handleCanvasCommand = (data: { playerId: string; command: CanvasCommand }) => {
-      // Don't apply our own commands (server excludes sender, but double-check)
-      if (data.playerId === userId) return;
-      
-      // Apply command to local canvas
-      engineRef.current?.applyCommand(data.command);
-    };
-    
-    // Handle canvas sync on join/reconnect
-    const handleCanvasSync = (data: { commands?: CanvasCommand[]; strokes?: Stroke[] }) => {
-      setPendingSync(true);
-      
-      try {
-        if (data.commands && data.commands.length > 0) {
-          // New: Replay command history for deterministic sync
-          engineRef.current?.replayCommands(data.commands);
-          console.log('[CANVAS] Synced via command history:', data.commands.length, 'commands');
-        } else if (data.strokes && data.strokes.length > 0) {
-          // Legacy: Fallback to stroke array
-          // Convert strokes to commands and replay
-          const commands = strokesToCommands(data.strokes, roomId || '', userId || '');
-          engineRef.current?.replayCommands(commands);
-          console.log('[CANVAS] Synced via legacy strokes:', data.strokes.length, 'strokes');
-        }
-        
-        setIsSynced(true);
-        setPendingSync(false);
-        onSyncComplete?.();
-      } catch (error) {
-        console.error('[CANVAS] Sync failed:', error);
-        setPendingSync(false);
-      }
-    };
-    
-    // Register listeners
-    socket.on('canvas:command', handleCanvasCommand);
-    socket.on('canvas:sync', handleCanvasSync);
-    
-    // Request sync if we're joining an existing game
-    if (roomId) {
-      socket.emit('canvas:request-sync', { roomId });
-    }
-    
-    return () => {
-      socket.off('canvas:command', handleCanvasCommand);
-      socket.off('canvas:sync', handleCanvasSync);
-    };
-  }, [socket, roomId, userId, onSyncComplete, canvasReady]);
-
-  // Flush pending points for a stroke
   const flushPendingPoints = useCallback((strokeId: string) => {
     const pending = pendingPointsRef.current.get(strokeId);
     if (!pending || pending.length === 0) return;
-    
-    // Create ADD_POINTS command
+
     const command: CanvasCommand = {
       id: `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       roomId: roomId || '',
@@ -186,14 +123,9 @@ export function useCanvasEngine({
         points: [...pending],
       } as AddPointsPayload,
     };
-    
-    // Apply locally
+
     engineRef.current?.applyCommand(command);
-    
-    // Send to server
     socket?.emit('canvas:command', { command });
-    
-    // Clear pending
     pendingPointsRef.current.set(strokeId, []);
   }, [roomId, userId, socket]);
 
@@ -204,6 +136,16 @@ export function useCanvasEngine({
     }
     scheduledStrokeIdRef.current = null;
   }, []);
+
+  const resetLocalCanvasState = useCallback(() => {
+    cancelScheduledFlush();
+    pendingPointsRef.current.clear();
+    activeStrokeIdRef.current = null;
+    setCommandCount(0);
+    setIsSynced(false);
+    setPendingSync(false);
+    engineRef.current?.replayCommands([]);
+  }, [cancelScheduledFlush]);
 
   useEffect(() => () => cancelScheduledFlush(), [cancelScheduledFlush]);
 
@@ -221,21 +163,74 @@ export function useCanvasEngine({
     [flushPendingPoints]
   );
 
-  // Apply local command (for drawer)
+  useEffect(() => {
+    if (!socket || !canvasReady || !engineRef.current) return;
+
+    const handleCanvasCommand = (data: { playerId: string; command: CanvasCommand }) => {
+      if (data.playerId === userId) return;
+      engineRef.current?.applyCommand(data.command);
+    };
+
+    const handleCanvasSync = (data: { commands?: CanvasCommand[]; strokes?: Stroke[] }) => {
+      setPendingSync(true);
+
+      try {
+        let nextCommandCount = 0;
+
+        if (Array.isArray(data.commands)) {
+          nextCommandCount = data.commands.length;
+          engineRef.current?.replayCommands(data.commands);
+          console.log('[CANVAS] Synced via command history:', data.commands.length, 'commands');
+        } else if (Array.isArray(data.strokes)) {
+          const commands = strokesToCommands(data.strokes, roomId || '', userId || '');
+          nextCommandCount = commands.length;
+          engineRef.current?.replayCommands(commands);
+          console.log('[CANVAS] Synced via legacy strokes:', data.strokes.length, 'strokes');
+        } else {
+          engineRef.current?.replayCommands([]);
+          console.log('[CANVAS] Sync payload empty; canvas cleared');
+        }
+
+        pendingPointsRef.current.clear();
+        activeStrokeIdRef.current = null;
+        setCommandCount(nextCommandCount);
+        setIsSynced(true);
+        setPendingSync(false);
+        onSyncComplete?.();
+      } catch (error) {
+        console.error('[CANVAS] Sync failed:', error);
+        setPendingSync(false);
+      }
+    };
+
+    socket.on('canvas:command', handleCanvasCommand);
+    socket.on('canvas:sync', handleCanvasSync);
+
+    if (roomId) {
+      socket.emit('canvas:request-sync', { roomId });
+    }
+
+    return () => {
+      socket.off('canvas:command', handleCanvasCommand);
+      socket.off('canvas:sync', handleCanvasSync);
+    };
+  }, [socket, roomId, userId, onSyncComplete, canvasReady]);
+
+  useEffect(() => {
+    if (!canvasReady) return;
+    resetLocalCanvasState();
+  }, [canvasReady, roomId, isDrawer, resetLocalCanvasState]);
+
   const applyLocalCommand = useCallback((command: CanvasCommand) => {
     if (!isDrawer) {
       console.warn('[CANVAS] Only drawer can send commands');
       return;
     }
-    
-    // Apply locally first
+
     engineRef.current?.applyCommand(command);
-    
-    // Send to server
     socket?.emit('canvas:command', { command });
   }, [isDrawer, socket]);
 
-  // Start a new stroke
   const startStroke = useCallback((tool: ToolType, color: string, size: number, opacity: number, startPoint?: Point): string => {
     if (!isDrawer) return '';
 
@@ -243,11 +238,8 @@ export function useCanvasEngine({
 
     const strokeId = `stroke-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     activeStrokeIdRef.current = strokeId;
-    
-    // Initialize pending points
     pendingPointsRef.current.set(strokeId, []);
-    
-    // Create START_STROKE command
+
     const command: CanvasCommand = {
       id: `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       roomId: roomId || '',
@@ -263,13 +255,12 @@ export function useCanvasEngine({
         startPoint: startPoint || { x: 0, y: 0 },
       } as StartStrokePayload,
     };
-    
+
     applyLocalCommand(command);
-    
+
     return strokeId;
   }, [isDrawer, roomId, userId, applyLocalCommand, cancelScheduledFlush]);
 
-  // Batched per animation frame: smooth local strokes without hundreds of socket.emit per second
   const addPoints = useCallback(
     (strokeId: string, points: Point[]) => {
       if (!isDrawer) return;
@@ -283,14 +274,12 @@ export function useCanvasEngine({
     [isDrawer, scheduleFlushStroke]
   );
 
-  // End stroke
   const endStroke = useCallback((strokeId: string) => {
     if (!isDrawer) return;
 
     cancelScheduledFlush();
     flushPendingPoints(strokeId);
-    
-    // Create END_STROKE command
+
     const command: CanvasCommand = {
       id: `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       roomId: roomId || '',
@@ -301,20 +290,18 @@ export function useCanvasEngine({
         strokeId,
       } as EndStrokePayload,
     };
-    
+
     applyLocalCommand(command);
-    
-    // Cleanup
+
     pendingPointsRef.current.delete(strokeId);
     if (activeStrokeIdRef.current === strokeId) {
       activeStrokeIdRef.current = null;
     }
   }, [isDrawer, roomId, userId, applyLocalCommand, flushPendingPoints, cancelScheduledFlush]);
 
-  // Fill tool
   const fill = useCallback((x: number, y: number, color: string, tolerance?: number) => {
     if (!isDrawer) return;
-    
+
     const command: CanvasCommand = {
       id: `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       roomId: roomId || '',
@@ -328,14 +315,13 @@ export function useCanvasEngine({
         tolerance: tolerance || 32,
       } as FillPayload,
     };
-    
+
     applyLocalCommand(command);
   }, [isDrawer, roomId, userId, applyLocalCommand]);
 
-  // Clear canvas
   const clearCanvas = useCallback(() => {
     if (!isDrawer) return;
-    
+
     const command: CanvasCommand = {
       id: `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       roomId: roomId || '',
@@ -344,14 +330,13 @@ export function useCanvasEngine({
       timestamp: Date.now(),
       payload: {},
     };
-    
+
     applyLocalCommand(command);
   }, [isDrawer, roomId, userId, applyLocalCommand]);
 
-  // Undo
   const undo = useCallback(() => {
     if (!isDrawer) return;
-    
+
     const command: CanvasCommand = {
       id: `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       roomId: roomId || '',
@@ -360,14 +345,13 @@ export function useCanvasEngine({
       timestamp: Date.now(),
       payload: {},
     };
-    
+
     applyLocalCommand(command);
   }, [isDrawer, roomId, userId, applyLocalCommand]);
 
-  // Redo
   const redo = useCallback(() => {
     if (!isDrawer) return;
-    
+
     const command: CanvasCommand = {
       id: `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       roomId: roomId || '',
@@ -376,11 +360,10 @@ export function useCanvasEngine({
       timestamp: Date.now(),
       payload: {},
     };
-    
+
     applyLocalCommand(command);
   }, [isDrawer, roomId, userId, applyLocalCommand]);
 
-  // Export canvas
   const exportCanvas = useCallback((): string => {
     return engineRef.current?.exportCanvas() || '';
   }, []);
@@ -403,14 +386,12 @@ export function useCanvasEngine({
   };
 }
 
-// Helper: Convert legacy strokes to commands
 function strokesToCommands(strokes: Stroke[], roomId: string, userId: string): CanvasCommand[] {
   const commands: CanvasCommand[] = [];
-  
+
   for (const stroke of strokes) {
     const timestamp = Date.now();
-    
-    // START_STROKE
+
     commands.push({
       id: `cmd-${timestamp}-start-${stroke.id}`,
       roomId,
@@ -426,8 +407,7 @@ function strokesToCommands(strokes: Stroke[], roomId: string, userId: string): C
         startPoint: stroke.points[0] || { x: 0, y: 0 },
       } as StartStrokePayload,
     });
-    
-    // ADD_POINTS (batch all points)
+
     if (stroke.points.length > 0) {
       commands.push({
         id: `cmd-${timestamp}-points-${stroke.id}`,
@@ -441,8 +421,7 @@ function strokesToCommands(strokes: Stroke[], roomId: string, userId: string): C
         } as AddPointsPayload,
       });
     }
-    
-    // END_STROKE
+
     commands.push({
       id: `cmd-${timestamp}-end-${stroke.id}`,
       roomId,
@@ -454,6 +433,6 @@ function strokesToCommands(strokes: Stroke[], roomId: string, userId: string): C
       } as EndStrokePayload,
     });
   }
-  
+
   return commands;
 }

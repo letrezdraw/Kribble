@@ -163,6 +163,8 @@ export class CanvasEngine {
   replayCommands(commands: CanvasCommand[]): void {
     // Clear current state
     this.clearAll();
+    this.commandHistory = [];
+    this.redoStack = [];
     
     // Replay each command in order
     for (const command of commands) {
@@ -676,11 +678,17 @@ export class CanvasEngine {
    * Clear all canvases and state
    */
   private clearAll(): void {
+    if (this.renderLiveRafRef !== null) {
+      cancelAnimationFrame(this.renderLiveRafRef);
+      this.renderLiveRafRef = null;
+    }
     this.clearStaticCanvas();
     this.clearLiveCanvas();
     this.strokes.clear();
     this.activeStrokes.clear();
     this.pendingPoints.clear();
+    this.redoStack = [];
+    this.isDrawing = false;
     this.stopBatchTimer();
   }
 

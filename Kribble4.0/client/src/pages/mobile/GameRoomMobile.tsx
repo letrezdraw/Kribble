@@ -164,6 +164,7 @@ export default function GameRoomMobile() {
   const visibleTimer = room?.phase === 'wordSelection'
     ? gameState.wordSelectionTimer
     : gameState.turnTimer;
+  const canvasTurnKey = `${room?.roundNumber ?? 0}-${room?.currentDrawerIndex ?? -1}-${room?.phase ?? 'waiting'}`;
 
   const sortedPlayers = [...(room?.players || [])].sort((a: Player, b: Player) => b.score - a.score);
   const isSoloMode = room?.settings?.gameMode === 'solo' || (room?.players?.length === 1 && room?.maxPlayers === 1);
@@ -493,6 +494,7 @@ export default function GameRoomMobile() {
       <main className="canvas-container-mobile">
         <div className="canvas-wrapper-mobile">
           <DrawingCanvas
+            key={canvasTurnKey}
             isDrawer={isDrawer}
             brushColor={brushColor}
             brushSize={brushSize}
